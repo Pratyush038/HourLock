@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import android.content.pm.ServiceInfo
 
 /**
  * HourLockForegroundService
@@ -57,7 +58,16 @@ class HourLockForegroundService : Service() {
         // intent may be null when the service is restarted after being killed
         // (START_STICKY behavior). We handle null gracefully.
         Log.i(TAG, "onStartCommand called (intent=${intent?.action ?: "null — restarted by OS"})")
-        startForeground(NOTIFICATION_ID, buildNotification())
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID, 
+                buildNotification(), 
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
         // START_STICKY: the OS will restart this service if killed. When
         // restarted, onStartCommand is called with intent=null. The
         // AccessibilityService (if still running) will call startForegroundService
