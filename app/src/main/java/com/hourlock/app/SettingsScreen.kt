@@ -700,7 +700,7 @@ private fun AddAppDialog(
                         unfocusedContainerColor = Color(0xFF16102E),
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF7C3AED),
+                        focusedIndicatorColor = Color(0xFF7C3AED),
                     ),
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)

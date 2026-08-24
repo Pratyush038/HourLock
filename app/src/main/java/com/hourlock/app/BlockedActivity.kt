@@ -13,6 +13,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -495,7 +496,7 @@ private fun PhraseChallenge(
                 unfocusedContainerColor = Color(0xFF1E1040),
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White,
-                focusedBorderColor = Color(0xFF7C3AED),
+                focusedIndicatorColor = Color(0xFF7C3AED),
             ),
             modifier = Modifier.fillMaxWidth()
         )
