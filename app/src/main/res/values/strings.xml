@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">HourLock</string>
+    <string name="accessibility_service_label">HourLock Screen Time</string>
+    <string name="accessibility_service_description">HourLock uses this permission to detect when a monitored app comes to the foreground, so it can enforce your hourly screen-time limits. It does not read, collect, or transmit any content from your screen or other apps.</string>
+</resources>

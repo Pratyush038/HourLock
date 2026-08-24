@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme: Material3 dark by default -->
+    <style name="Theme.HourLock" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Window background matches our Compose dark bg to prevent white flash on launch -->
+        <item name="android:windowBackground">@color/launch_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- Blocked activity theme: fullscreen, no title bar, same dark bg -->
+    <style name="Theme.HourLock.Blocked" parent="Theme.HourLock">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

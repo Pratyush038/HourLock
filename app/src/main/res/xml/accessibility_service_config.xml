@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    accessibility_service_config.xml
+    ─────────────────────────────────
+    Configuration for UsageTrackerService (AccessibilityService).
+
+    KEY DESIGN DECISIONS:
+
+    accessibilityEventTypes="typeWindowStateChanged"
+    ─ We subscribe ONLY to window-state-changed events. These fire when the
+      visible Activity/window changes — exactly what we need to detect app
+      switches. We deliberately skip typeWindowContentChanged, typeViewClicked,
+      typeViewScrolled, etc. to ensure we never see inside other apps' UI trees,
+      fulfilling the "no touch interception, no gesture dispatch" safety promise.
+
+    accessibilityFeedbackType="feedbackGeneric"
+    ─ Required field; "generic" means no screen reader / haptic / audio side
+      effects. Pure silent event listener.
+
+    canRetrieveWindowContent="false"
+    ─ Explicitly false — we do NOT need to inspect the UI tree of any app.
+      This is a critical safety flag: setting it false prevents us from reading
+      the text, view hierarchy, or screenshots of other apps even accidentally.
+
+    notificationTimeout="100"
+    ─ 100 ms debounce between consecutive events. A user rapidly switching apps
+      might fire many events; 100 ms prevents redundant processing without
+      causing perceptible delay.
+-->
+<accessibility-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="100"
+    android:settingsActivity="com.hourlock.app.MainActivity" />

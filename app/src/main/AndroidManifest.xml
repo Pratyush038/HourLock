@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.hourlock.app">
+
+    <!-- ─── Permissions ──────────────────────────────────────────────────── -->
+
+    <!--
+        PACKAGE_USAGE_STATS: required by Settings screen to enumerate installed
+        apps and by PrefsRepository to read daily total usage. The user must
+        grant this manually via Settings > Apps > Special app access > Usage access.
+    -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!--
+        FOREGROUND_SERVICE: needed to keep HourLockForegroundService alive so
+        Samsung aggressive battery management doesn't kill the AccessibilityService.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!--
+        POST_NOTIFICATIONS: required on Android 13+ to show the persistent
+        foreground service notification.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+        QUERY_ALL_PACKAGES: needed to list all installed apps in Settings screen
+        so the user can pick which apps to monitor.
+        NOTE: we do NOT use INTERNET or any network permission — the app is
+        fully offline and no data leaves the device.
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- ─── Application ──────────────────────────────────────────────────── -->
+
+    <application
+        android:name=".HourLockApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.HourLock"
+        tools:targetApi="31">
+
+        <!-- ─── Main Activity ──────────────────────────────────────────── -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- ─── Blocked Activity ───────────────────────────────────────── -->
+        <!--
+            showWhenLocked + turnScreenOn: ensures BlockedActivity appears even
+            when the monitored app runs over the lock screen.
+            FLAG_ACTIVITY_NEW_TASK is set programmatically; the activity
+            starts in its own task so it can overlay any other app.
+        -->
+        <activity
+            android:name=".BlockedActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity="com.hourlock.app.blocked"
+            android:launchMode="singleInstance"
+            android:theme="@style/Theme.HourLock.Blocked" />
+
+        <!-- ─── Foreground Service ─────────────────────────────────────── -->
+        <!--
+            FOREGROUND_SERVICE_TYPE omitted intentionally — using "default" type
+            which requires only the FOREGROUND_SERVICE permission (no location,
+            camera, mic, etc.). Keeps the permission footprint minimal.
+        -->
+        <!--
+            stopWithTask="false": service keeps running even after the user
+            swipes the app away from Recents. This is critical so the
+            AccessibilityService keeps receiving events while HourLock is
+            not the foreground app (which is the entire point of the app).
+        -->
+        <service
+            android:name=".HourLockForegroundService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <!-- ─── Accessibility Service ──────────────────────────────────── -->
+        <!--
+            The AccessibilityService is bound by Android's a11y framework — it
+            does NOT need BIND_ACCESSIBILITY_SERVICE declared as a uses-permission
+            (that's granted to the framework, not us). We declare it here so the
+            system can bind to it once the user enables it in Accessibility Settings.
+        -->
+        <service
+            android:name=".UsageTrackerService"
+            android:exported="true"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+    </application>
+
+</manifest>
