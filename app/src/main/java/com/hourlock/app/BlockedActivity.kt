@@ -7,7 +7,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -15,8 +14,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,50 +24,32 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hourlock.app.ui.theme.AccentOrange
-import com.hourlock.app.ui.theme.AccentRed
 import com.hourlock.app.ui.theme.DarkBackground
 import com.hourlock.app.ui.theme.DarkBorder
 import com.hourlock.app.ui.theme.DarkBorderSubtle
@@ -82,7 +61,6 @@ import com.hourlock.app.ui.theme.PureWhite
 import com.hourlock.app.ui.theme.TextMutedDark
 import com.hourlock.app.ui.theme.TextSecondaryDark
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -90,8 +68,8 @@ import java.util.Locale
 /**
  * BlockedActivity
  * ────────────────
- * Minimalist, high-contrast lock screen overlay displayed when an app's
- * hourly quota is reached.
+ * Minimalist, strict lock screen overlay displayed when an app's
+ * hourly quota is reached. No bypasses or emergency breaks.
  */
 class BlockedActivity : ComponentActivity() {
 
@@ -107,8 +85,7 @@ class BlockedActivity : ComponentActivity() {
             HourLockTheme(darkTheme = true) {
                 BlockedScreen(
                     blockedPackage = pkg,
-                    onGoHome = { navigateHome() },
-                    onEmergencyAccess = { handleEmergencyAccess(pkg) }
+                    onGoHome = { navigateHome() }
                 )
             }
         }
@@ -122,8 +99,7 @@ class BlockedActivity : ComponentActivity() {
             HourLockTheme(darkTheme = true) {
                 BlockedScreen(
                     blockedPackage = pkg,
-                    onGoHome = { navigateHome() },
-                    onEmergencyAccess = { handleEmergencyAccess(pkg) }
+                    onGoHome = { navigateHome() }
                 )
             }
         }
@@ -137,26 +113,17 @@ class BlockedActivity : ComponentActivity() {
         startActivity(homeIntent)
         finish()
     }
-
-    private fun handleEmergencyAccess(pkg: String) {
-        finish()
-    }
 }
 
 // ─── COMPOSE UI ────────────────────────────────────────────────────────────────
 
-private const val UNLOCK_PHRASE = "I need a break"
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BlockedScreen(
     blockedPackage: String,
-    onGoHome: () -> Unit,
-    onEmergencyAccess: () -> Unit
+    onGoHome: () -> Unit
 ) {
     val context = LocalContext.current
     val repo = remember { PrefsRepository(context) }
-    val scope = rememberCoroutineScope()
     val appLabel = remember(blockedPackage) { getAppLabel(context, blockedPackage) }
 
     // ── Countdown to next hour ─────────────────────────────────────────────
@@ -173,15 +140,6 @@ fun BlockedScreen(
             delay(1000L)
         }
     }
-
-    val unlockMode by repo.unlockModeFlow.collectAsState(initial = "none")
-
-    // UI state: "blocked" | "challenge" | "waiting" | "granted"
-    var screenState by remember { mutableStateOf("blocked") }
-    var phraseInput by remember { mutableStateOf("") }
-    var waitProgress by remember { mutableStateOf(0f) }
-    var waitSecondsLeft by remember { mutableIntStateOf(30) }
-    var phraseError by remember { mutableStateOf(false) }
 
     // Pulsing animation
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -260,7 +218,7 @@ fun BlockedScreen(
                 )
 
                 Text(
-                    text = "Take a breath. You've reached your screen budget for this clock hour.",
+                    text = "Take a break. You've reached your screen budget for this clock hour.",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = TextSecondaryDark,
                         textAlign = TextAlign.Center,
@@ -346,108 +304,6 @@ fun BlockedScreen(
                             "Return to Home",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                // Secondary Emergency Access Trigger
-                when (screenState) {
-                    "blocked" -> {
-                        TextButton(
-                            onClick = {
-                                when (unlockMode) {
-                                    "none" -> {
-                                        scope.launch {
-                                            repo.grantEmergencyAccess(blockedPackage)
-                                            onEmergencyAccess()
-                                        }
-                                    }
-                                    "phrase" -> screenState = "challenge"
-                                    "wait" -> {
-                                        screenState = "waiting"
-                                        scope.launch {
-                                            for (i in 30 downTo 0) {
-                                                waitSecondsLeft = i
-                                                waitProgress = (30 - i) / 30f
-                                                delay(1000L)
-                                            }
-                                            repo.grantEmergencyAccess(blockedPackage)
-                                            onEmergencyAccess()
-                                        }
-                                    }
-                                }
-                            }
-                        ) {
-                            Text(
-                                "Emergency 2-min access",
-                                color = TextMutedDark,
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
-                            )
-                        }
-                    }
-
-                    "waiting" -> {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                progress = { waitProgress },
-                                color = PureWhite,
-                                strokeWidth = 3.dp,
-                                modifier = Modifier.size(32.dp)
-                            )
-                            Text(
-                                "Unlocking in ${waitSecondsLeft}s...",
-                                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondaryDark)
-                            )
-                        }
-                    }
-
-                    "challenge" -> {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                "Type \"$UNLOCK_PHRASE\" to unlock:",
-                                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondaryDark)
-                            )
-                            OutlinedTextField(
-                                value = phraseInput,
-                                onValueChange = {
-                                    phraseInput = it
-                                    phraseError = false
-                                },
-                                singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = DarkSurfaceElevated,
-                                    unfocusedContainerColor = DarkSurfaceElevated,
-                                    focusedTextColor = PureWhite,
-                                    unfocusedTextColor = PureWhite,
-                                    focusedIndicatorColor = PureWhite,
-                                    unfocusedIndicatorColor = DarkBorder
-                                ),
-                                modifier = Modifier.fillMaxWidth(),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = {
-                                    if (phraseInput.trim().equals(UNLOCK_PHRASE, ignoreCase = true)) {
-                                        scope.launch {
-                                            repo.grantEmergencyAccess(blockedPackage)
-                                            onEmergencyAccess()
-                                        }
-                                    } else {
-                                        phraseError = true
-                                    }
-                                })
-                            )
-
-                            if (phraseError) {
-                                Text("Phrase doesn't match.", color = AccentRed, fontSize = 12.sp)
-                            }
-                        }
                     }
                 }
             }

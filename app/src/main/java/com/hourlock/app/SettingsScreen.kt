@@ -3,15 +3,9 @@ package com.hourlock.app
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,23 +17,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Battery4Bar
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,8 +35,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -75,16 +61,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hourlock.app.ui.theme.AccentGreen
 import com.hourlock.app.ui.theme.AccentOrange
-import com.hourlock.app.ui.theme.AccentRed
 import com.hourlock.app.ui.theme.DarkBorder
 import com.hourlock.app.ui.theme.DarkBorderSubtle
-import com.hourlock.app.ui.theme.DarkSurface
 import com.hourlock.app.ui.theme.DarkSurfaceCard
 import com.hourlock.app.ui.theme.DarkSurfaceElevated
 import com.hourlock.app.ui.theme.PureBlack
 import com.hourlock.app.ui.theme.PureWhite
 import com.hourlock.app.ui.theme.TextMutedDark
-import com.hourlock.app.ui.theme.TextPrimaryDark
 import com.hourlock.app.ui.theme.TextSecondaryDark
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -93,10 +76,9 @@ import kotlinx.coroutines.launch
  * SettingsScreen
  * ──────────────
  * Minimalist monochromatic settings:
- *  1. Permissions status (Accessibility, Usage Access, Battery, Notifications)
+ *  1. Permissions status (Accessibility, Usage Access, Battery)
  *  2. Monitored apps with individual limit sliders
- *  3. Emergency unlock challenge configuration
- *  4. Privacy & Safety manifesto
+ *  3. Privacy & Safety manifesto
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,7 +88,6 @@ fun SettingsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     val monitoredPackages by repo.monitoredPackagesFlow.collectAsState(initial = setOf("com.instagram.android"))
-    val unlockMode by repo.unlockModeFlow.collectAsState(initial = "none")
 
     var a11yGranted by remember { mutableStateOf(false) }
     var usageGranted by remember { mutableStateOf(false) }
@@ -250,46 +231,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
             }
 
-            // ── EMERGENCY UNLOCK CHALLENGE ─────────────────────────────────────
-            item {
-                SectionTitle("EMERGENCY UNLOCK MODE")
-            }
-
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
-                    border = BorderStroke(1.dp, DarkBorder)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        UnlockModeOption(
-                            title = "No challenge",
-                            description = "Instant 2-minute emergency unlock",
-                            selected = unlockMode == "none",
-                            onSelect = { scope.launch { repo.setUnlockMode("none") } }
-                        )
-
-                        UnlockModeOption(
-                            title = "30s Breathing timer",
-                            description = "Requires a 30-second mindful wait",
-                            selected = unlockMode == "wait",
-                            onSelect = { scope.launch { repo.setUnlockMode("wait") } }
-                        )
-
-                        UnlockModeOption(
-                            title = "Type phrase challenge",
-                            description = "Requires typing 'I need a break'",
-                            selected = unlockMode == "phrase",
-                            onSelect = { scope.launch { repo.setUnlockMode("phrase") } }
-                        )
-                    }
-                }
-            }
-
             // ── PRIVACY & SAFETY CARD ──────────────────────────────────────────
             item {
                 SectionTitle("SAFETY & OFFLINE PRIVACY")
@@ -320,7 +261,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                             )
                         }
                         Text(
-                            "• Zero network permissions — no data can leave your device.\n• Window content inspection disabled — cannot read text or passwords.\n• Never blocks emergency dialers, camera, or system settings.",
+                            "• Zero network permissions — no data can leave your device.\n• Strict locking — no emergency bypasses.\n• Window content inspection disabled — cannot read text or passwords.\n• Never blocks emergency dialers, camera, or system settings.",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = TextSecondaryDark,
                                 lineHeight = 20.sp
@@ -421,7 +362,6 @@ private fun MonitoredAppBudgetCard(
     val appLabel = remember(pkg) { getAppLabel(context, pkg) }
 
     var sliderValue by remember(limitMin) { mutableFloatStateOf(limitMin.toFloat()) }
-    var expanded by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -499,54 +439,6 @@ private fun MonitoredAppBudgetCard(
                     inactiveTrackColor = DarkSurfaceElevated
                 )
             )
-        }
-    }
-}
-
-// ─── UNLOCK MODE OPTION ────────────────────────────────────────────────────────
-
-@Composable
-private fun UnlockModeOption(
-    title: String,
-    description: String,
-    selected: Boolean,
-    onSelect: () -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .clickable { onSelect() },
-        color = if (selected) DarkSurfaceElevated else Color.Transparent,
-        border = BorderStroke(1.dp, if (selected) PureWhite.copy(alpha = 0.3f) else Color.Transparent)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            RadioButton(
-                selected = selected,
-                onClick = onSelect,
-                colors = RadioButtonDefaults.colors(
-                    selectedColor = PureWhite,
-                    unselectedColor = TextMutedDark
-                )
-            )
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = PureWhite
-                    )
-                )
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.labelSmall.copy(color = TextSecondaryDark)
-                )
-            }
         }
     }
 }

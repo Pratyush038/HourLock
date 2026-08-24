@@ -252,10 +252,7 @@ class UsageTrackerService : AccessibilityService() {
         if (used >= limitSec) {
             Log.i(TAG, "$pkg reached limit ($used/$limitSec s) — launching BlockedActivity")
             launchBlockedActivity(pkg)
-            // Stop the timer — BlockedActivity takes over; it will handle
-            // "emergency access" by calling grantEmergencyAccess() which
-            // decrements usedSeconds, causing this timer to resume tracking
-            // normally when the user returns to the app.
+            // Stop the timer — BlockedActivity takes over until the next clock hour
             stopTimerIfRunning(reason = "limit reached for $pkg")
         }
     }

@@ -269,30 +269,6 @@ class PrefsRepository(private val context: Context) {
         dataStore.edit { prefs -> prefs[limitMinutesKey(pkg)] = minutes.coerceIn(1, 60) }
     }
 
-    // ─── Unlock options ────────────────────────────────────────────────────
-
-    /** Key for the unlock challenge type: "none" | "phrase" | "wait" */
-    private val KEY_UNLOCK_MODE = stringPreferencesKey("unlock_mode")
-    val unlockModeFlow: Flow<String> = dataStore.data.map { prefs ->
-        prefs[KEY_UNLOCK_MODE] ?: "none"
-    }
-
-    suspend fun setUnlockMode(mode: String) {
-        dataStore.edit { prefs -> prefs[KEY_UNLOCK_MODE] = mode }
-    }
-
-    /**
-     * Grant 2 extra minutes of emergency access for [pkg].
-     * The 120 seconds are added to usedSeconds (still count against the hour)
-     * so the user can use them exactly once per hour.
-     */
-    suspend fun grantEmergencyAccess(pkg: String) {
-        dataStore.edit { prefs ->
-            val current = prefs[usedSecondsKey(pkg)] ?: 0
-            // Subtract 120 s from usedSeconds so the block triggers again
-            // 2 min later. We never go below 0.
-            prefs[usedSecondsKey(pkg)] = (current - 120).coerceAtLeast(0)
-        }
     }
 
     // ─── Today's total usage (calculated from local midnight 00:00:00) ──────
