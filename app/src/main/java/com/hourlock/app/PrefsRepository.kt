@@ -269,8 +269,6 @@ class PrefsRepository(private val context: Context) {
         dataStore.edit { prefs -> prefs[limitMinutesKey(pkg)] = minutes.coerceIn(1, 60) }
     }
 
-    }
-
     // ─── Today's total usage (calculated from local midnight 00:00:00) ──────
 
     /**
