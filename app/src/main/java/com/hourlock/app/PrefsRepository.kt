@@ -301,7 +301,7 @@ class PrefsRepository(private val context: Context) {
      * Exact total foreground usage today in seconds for [pkg].
      * Computed using UsageStatsManager.queryEvents() from midnight (00:00:00)
      * in the device's local timezone (e.g. IST GMT+5:30) to now.
-     * This avoids coarse daily bucket inaccuracies.
+     * Accurately tracks app switches, screen lock / off transitions, and pauses.
      */
     suspend fun getTodayTotalSeconds(pkg: String, context: Context): Long = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
@@ -326,8 +326,23 @@ class PrefsRepository(private val context: Context) {
             val event = android.app.usage.UsageEvents.Event()
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
-                if (event.packageName == pkg) {
-                    when (event.eventType) {
+                val p = event.packageName
+                val type = event.eventType
+
+                // Screen turned off, phone locked, or shutdown -> end active foreground session
+                if (type == 16 /* SCREEN_NON_INTERACTIVE */ ||
+                    type == 17 /* KEYGUARD_SHOWN */ ||
+                    type == 26 /* DEVICE_SHUTDOWN */) {
+                    if (isForeground && lastResumeTime > 0L) {
+                        totalTimeMs += (event.timeStamp - lastResumeTime).coerceAtLeast(0L)
+                    }
+                    isForeground = false
+                    lastResumeTime = 0L
+                    continue
+                }
+
+                if (p == pkg) {
+                    when (type) {
                         android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED,
                         android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND -> {
                             lastResumeTime = event.timeStamp
@@ -343,10 +358,22 @@ class PrefsRepository(private val context: Context) {
                             lastResumeTime = 0L
                         }
                     }
+                } else if (isForeground && p != null && p !in TRANSIENT_SYSTEM_PACKAGES) {
+                    // Switched to another app
+                    if (type == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ||
+                        type == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                        if (lastResumeTime > 0L) {
+                            totalTimeMs += (event.timeStamp - lastResumeTime).coerceAtLeast(0L)
+                        }
+                        isForeground = false
+                        lastResumeTime = 0L
+                    }
                 }
             }
 
-            if (isForeground && lastResumeTime > 0L && lastResumeTime < now) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            val isScreenOn = pm?.isInteractive ?: true
+            if (isForeground && isScreenOn && lastResumeTime > 0L && lastResumeTime < now) {
                 totalTimeMs += (now - lastResumeTime).coerceAtLeast(0L)
             }
 
@@ -383,8 +410,26 @@ class PrefsRepository(private val context: Context) {
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 val p = event.packageName
+                val type = event.eventType
+
+                if (type == 16 /* SCREEN_NON_INTERACTIVE */ ||
+                    type == 17 /* KEYGUARD_SHOWN */ ||
+                    type == 26 /* DEVICE_SHUTDOWN */) {
+                    for ((pkgName, isFg) in foregroundState) {
+                        if (isFg) {
+                            val lastResume = resumeTimes[pkgName] ?: 0L
+                            if (lastResume > 0L) {
+                                totalTimeMs += (event.timeStamp - lastResume).coerceAtLeast(0L)
+                            }
+                        }
+                    }
+                    foregroundState.clear()
+                    resumeTimes.clear()
+                    continue
+                }
+
                 if (p != null && p in pkgs) {
-                    when (event.eventType) {
+                    when (type) {
                         android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED,
                         android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND -> {
                             resumeTimes[p] = event.timeStamp
@@ -403,14 +448,32 @@ class PrefsRepository(private val context: Context) {
                             resumeTimes[p] = 0L
                         }
                     }
+                } else if (p != null && p !in TRANSIENT_SYSTEM_PACKAGES) {
+                    if (type == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ||
+                        type == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                        for ((pkgName, isFg) in foregroundState) {
+                            if (isFg) {
+                                val lastResume = resumeTimes[pkgName] ?: 0L
+                                if (lastResume > 0L) {
+                                    totalTimeMs += (event.timeStamp - lastResume).coerceAtLeast(0L)
+                                }
+                            }
+                        }
+                        foregroundState.clear()
+                        resumeTimes.clear()
+                    }
                 }
             }
 
-            for ((p, isFg) in foregroundState) {
-                if (isFg) {
-                    val lastResume = resumeTimes[p] ?: 0L
-                    if (lastResume > 0L && lastResume < now) {
-                        totalTimeMs += (now - lastResume).coerceAtLeast(0L)
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            val isScreenOn = pm?.isInteractive ?: true
+            if (isScreenOn) {
+                for ((p, isFg) in foregroundState) {
+                    if (isFg) {
+                        val lastResume = resumeTimes[p] ?: 0L
+                        if (lastResume > 0L && lastResume < now) {
+                            totalTimeMs += (now - lastResume).coerceAtLeast(0L)
+                        }
                     }
                 }
             }
