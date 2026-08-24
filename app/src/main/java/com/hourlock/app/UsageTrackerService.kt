@@ -80,14 +80,21 @@ class UsageTrackerService : AccessibilityService() {
             }
             serviceInfo = info
 
-            // Warm-up: load current prefs so the first event is handled fast
+            // Start collecting state changes continuously so we instantly know
+            // when the user adds/removes apps or toggles blocking.
             serviceScope.launch {
-                try {
-                    cachedMonitoredPackages = repo.getMonitoredPackages()
-                    cachedBlockingEnabled = repo.blockingEnabledFlow.first()
-                    cachedPauseUntil = repo.pauseUntilFlow.first()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to warm-up prefs", e)
+                repo.monitoredPackagesFlow.collect { pkgs ->
+                    cachedMonitoredPackages = pkgs
+                }
+            }
+            serviceScope.launch {
+                repo.blockingEnabledFlow.collect { enabled ->
+                    cachedBlockingEnabled = enabled
+                }
+            }
+            serviceScope.launch {
+                repo.pauseUntilFlow.collect { pauseTime ->
+                    cachedPauseUntil = pauseTime
                 }
             }
 
