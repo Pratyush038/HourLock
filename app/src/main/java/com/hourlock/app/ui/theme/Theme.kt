@@ -1,94 +1,109 @@
 package com.hourlock.app.ui.theme
 
 import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// ── Brand colors ───────────────────────────────────────────────────────────────
+// ── Monochromatic Black & White Design Tokens ─────────────────────────────────
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+val PureBlack = Color(0xFF000000)
+val DarkBackground = Color(0xFF09090B)
+val DarkSurface = Color(0xFF121215)
+val DarkSurfaceCard = Color(0xFF18181C)
+val DarkSurfaceElevated = Color(0xFF222228)
+val DarkBorder = Color(0xFF27272E)
+val DarkBorderSubtle = Color(0xFF1C1C22)
 
-val Purple40 = Color(0xFF6650A4)
-val PurpleGrey40 = Color(0xFF625B71)
-val Pink40 = Color(0xFF7D5260)
+val PureWhite = Color(0xFFFFFFFF)
+val TextPrimaryDark = Color(0xFFF4F4F5)
+val TextSecondaryDark = Color(0xFFA1A1AA)
+val TextMutedDark = Color(0xFF71717A)
 
-// Custom dark scheme tuned for HourLock's deep purple night aesthetic
+// Subtle functional accents
+val AccentOrange = Color(0xFFFF5B22) // Reference warm pill badge
+val AccentGreen = Color(0xFF22C55E)  // Active status
+val AccentRed = Color(0xFFEF4444)    // Blocked alert
+
+// Dark Scheme
 private val HourLockDarkColorScheme = darkColorScheme(
-    primary = Color(0xFF7C3AED),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFF4C1D95),
-    onPrimaryContainer = Color(0xFFE9D5FF),
+    primary = PureWhite,
+    onPrimary = PureBlack,
+    primaryContainer = DarkSurfaceCard,
+    onPrimaryContainer = PureWhite,
 
-    secondary = Color(0xFFBB86FC),
-    onSecondary = Color(0xFF1A0040),
-    secondaryContainer = Color(0xFF2D1B69),
-    onSecondaryContainer = Color(0xFFDDD6FE),
+    secondary = TextSecondaryDark,
+    onSecondary = PureBlack,
+    secondaryContainer = DarkSurfaceElevated,
+    onSecondaryContainer = PureWhite,
 
-    tertiary = Color(0xFF9B7FCA),
-    onTertiary = Color(0xFF120D28),
+    tertiary = AccentOrange,
+    onTertiary = PureWhite,
 
-    background = Color(0xFF0A0A1A),
-    onBackground = Color.White,
+    background = DarkBackground,
+    onBackground = TextPrimaryDark,
 
-    surface = Color(0xFF120D28),
-    onSurface = Color.White,
-    surfaceVariant = Color(0xFF1E1040),
-    onSurfaceVariant = Color(0xFFBBB3D0),
+    surface = DarkSurface,
+    onSurface = TextPrimaryDark,
+    surfaceVariant = DarkSurfaceCard,
+    onSurfaceVariant = TextSecondaryDark,
 
-    error = Color(0xFFEF5350),
-    onError = Color.White,
+    error = AccentRed,
+    onError = PureWhite,
 
-    outline = Color(0xFF4A2D82),
-    outlineVariant = Color(0xFF2D1B69),
+    outline = DarkBorder,
+    outlineVariant = DarkBorderSubtle,
 )
 
-// Light scheme (unlikely to be used since the app is dark-first, but required
-// for completeness and for users who force light mode at the system level)
+// Light Scheme
 private val HourLockLightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
+    primary = PureBlack,
+    onPrimary = PureWhite,
+    primaryContainer = Color(0xFFE4E4E7),
+    onPrimaryContainer = PureBlack,
+
+    secondary = Color(0xFF52525B),
+    onSecondary = PureWhite,
+    secondaryContainer = Color(0xFFF4F4F5),
+    onSecondaryContainer = PureBlack,
+
+    tertiary = AccentOrange,
+    onTertiary = PureWhite,
+
+    background = Color(0xFFF4F5F7),
+    onBackground = Color(0xFF09090B),
+
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF09090B),
+    surfaceVariant = Color(0xFFFFFFFF),
+    onSurfaceVariant = Color(0xFF71717A),
+
+    error = AccentRed,
+    onError = PureWhite,
+
+    outline = Color(0xFFE4E4E7),
+    outlineVariant = Color(0xFFF4F4F5),
 )
 
 @Composable
 fun HourLockTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color disabled — we use our curated purple palette instead.
-    // Dynamic color on Android 12+ would override our brand colors with
-    // the user's wallpaper-derived colors, which may not look good.
-    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> HourLockDarkColorScheme
-        else -> HourLockLightColorScheme
-    }
+    val colorScheme = if (darkTheme) HourLockDarkColorScheme else HourLockLightColorScheme
 
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            // Set the status bar color to match our background
             window.statusBarColor = colorScheme.background.toArgb()
-            // Light icons = false → white icons on our dark background
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
         }
     }

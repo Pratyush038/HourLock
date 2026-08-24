@@ -295,18 +295,19 @@ class PrefsRepository(private val context: Context) {
         }
     }
 
-    // ─── Today's total usage (for Home screen stat) ────────────────────────
+    // ─── Today's total usage (calculated from local midnight 00:00:00) ──────
 
     /**
-     * Approximate total usage today in seconds for all monitored packages.
-     * We compute this from UsageStatsManager (PACKAGE_USAGE_STATS) to give
-     * a real number rather than just the current hour's tracked value.
-     * Returns 0 if the permission is not granted.
+     * Exact total foreground usage today in seconds for [pkg].
+     * Computed using UsageStatsManager.queryEvents() from midnight (00:00:00)
+     * in the device's local timezone (e.g. IST GMT+5:30) to now.
+     * This avoids coarse daily bucket inaccuracies.
      */
-    suspend fun getTodayTotalSeconds(pkg: String, context: Context): Long {
-        return try {
-            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE)
-                as android.app.usage.UsageStatsManager
+    suspend fun getTodayTotalSeconds(pkg: String, context: Context): Long = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager
+                ?: return@withContext 0L
+
             val cal = java.util.Calendar.getInstance()
             cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
             cal.set(java.util.Calendar.MINUTE, 0)
@@ -314,8 +315,107 @@ class PrefsRepository(private val context: Context) {
             cal.set(java.util.Calendar.MILLISECOND, 0)
             val startOfDay = cal.timeInMillis
             val now = System.currentTimeMillis()
-            val statsMap = usm.queryAndAggregateUsageStats(startOfDay, now)
-            statsMap[pkg]?.totalTimeInForeground?.div(1000L) ?: 0L
+
+            if (now <= startOfDay) return@withContext 0L
+
+            val events = usm.queryEvents(startOfDay, now)
+            var totalTimeMs = 0L
+            var lastResumeTime = 0L
+            var isForeground = false
+
+            val event = android.app.usage.UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.packageName == pkg) {
+                    when (event.eventType) {
+                        android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED,
+                        android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND -> {
+                            lastResumeTime = event.timeStamp
+                            isForeground = true
+                        }
+                        android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED,
+                        android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED,
+                        android.app.usage.UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                            if (isForeground && lastResumeTime > 0L) {
+                                totalTimeMs += (event.timeStamp - lastResumeTime).coerceAtLeast(0L)
+                            }
+                            isForeground = false
+                            lastResumeTime = 0L
+                        }
+                    }
+                }
+            }
+
+            if (isForeground && lastResumeTime > 0L && lastResumeTime < now) {
+                totalTimeMs += (now - lastResumeTime).coerceAtLeast(0L)
+            }
+
+            totalTimeMs / 1000L
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
+    /**
+     * Exact total foreground usage today in seconds across ALL [pkgs] combined.
+     */
+    suspend fun getTodayTotalSecondsAll(pkgs: Set<String>, context: Context): Long = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager
+                ?: return@withContext 0L
+
+            val cal = java.util.Calendar.getInstance()
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            val startOfDay = cal.timeInMillis
+            val now = System.currentTimeMillis()
+
+            if (now <= startOfDay || pkgs.isEmpty()) return@withContext 0L
+
+            val events = usm.queryEvents(startOfDay, now)
+            var totalTimeMs = 0L
+            val resumeTimes = mutableMapOf<String, Long>()
+            val foregroundState = mutableMapOf<String, Boolean>()
+
+            val event = android.app.usage.UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                val p = event.packageName
+                if (p != null && p in pkgs) {
+                    when (event.eventType) {
+                        android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED,
+                        android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND -> {
+                            resumeTimes[p] = event.timeStamp
+                            foregroundState[p] = true
+                        }
+                        android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED,
+                        android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED,
+                        android.app.usage.UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                            if (foregroundState[p] == true) {
+                                val lastResume = resumeTimes[p] ?: 0L
+                                if (lastResume > 0L) {
+                                    totalTimeMs += (event.timeStamp - lastResume).coerceAtLeast(0L)
+                                }
+                            }
+                            foregroundState[p] = false
+                            resumeTimes[p] = 0L
+                        }
+                    }
+                }
+            }
+
+            for ((p, isFg) in foregroundState) {
+                if (isFg) {
+                    val lastResume = resumeTimes[p] ?: 0L
+                    if (lastResume > 0L && lastResume < now) {
+                        totalTimeMs += (now - lastResume).coerceAtLeast(0L)
+                    }
+                }
+            }
+
+            totalTimeMs / 1000L
         } catch (e: Exception) {
             0L
         }
