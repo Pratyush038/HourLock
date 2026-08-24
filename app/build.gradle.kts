@@ -76,6 +76,9 @@ android {
 dependencies {
     // ── Core ──────────────────────────────────────────────────────────────
     implementation(libs.androidx.core.ktx)
+    // Google Material — provides Theme.Material3.DayNight.NoActionBar for themes.xml
+    implementation(libs.google.material)
+    implementation(libs.androidx.appcompat)
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
     implementation(libs.androidx.lifecycle.runtime.ktx)
