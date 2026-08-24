@@ -122,6 +122,12 @@ class UsageTrackerService : AccessibilityService() {
 
             val pkg = event.packageName?.toString() ?: return
 
+            // TRANSIENT SYSTEM PACKAGES: Keyboards, System UI notifications/panels.
+            // When these appear over a monitored app, do NOT stop tracking the app.
+            if (pkg in TRANSIENT_SYSTEM_PACKAGES) {
+                return
+            }
+
             // FAST PATH: never-block list takes absolute precedence
             if (pkg in NEVER_BLOCK_PACKAGES) {
                 stopTimerIfRunning(reason = "never-block package came to foreground")
@@ -186,6 +192,13 @@ class UsageTrackerService : AccessibilityService() {
     private fun startTimerFor(pkg: String) {
         timerJob = serviceScope.launch {
             Log.d(TAG, "Timer started for $pkg")
+            // Immediate check: if already at limit, block immediately without waiting 1s
+            try {
+                checkInitialLimit(pkg)
+            } catch (e: Exception) {
+                Log.e(TAG, "Initial limit check error for $pkg", e)
+            }
+
             while (true) {
                 delay(TICK_INTERVAL_MS)
                 try {
@@ -195,6 +208,24 @@ class UsageTrackerService : AccessibilityService() {
                     // Don't cancel — keep ticking on next second
                 }
             }
+        }
+    }
+
+    private suspend fun checkInitialLimit(pkg: String) {
+        cachedBlockingEnabled = repo.blockingEnabledFlow.first()
+        cachedPauseUntil = repo.pauseUntilFlow.first()
+        cachedMonitoredPackages = repo.getMonitoredPackages()
+
+        if (pkg !in cachedMonitoredPackages) return
+        if (!cachedBlockingEnabled) return
+        if (System.currentTimeMillis() < cachedPauseUntil) return
+
+        val used = repo.getUsedSeconds(pkg)
+        val limitSec = repo.getLimitSeconds(pkg)
+        if (used >= limitSec) {
+            Log.i(TAG, "$pkg already at limit ($used/$limitSec s) — launching BlockedActivity immediately")
+            launchBlockedActivity(pkg)
+            stopTimerIfRunning(reason = "limit reached on launch for $pkg")
         }
     }
 

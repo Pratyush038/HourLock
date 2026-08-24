@@ -102,6 +102,18 @@ val NEVER_BLOCK_PACKAGES = setOf(
     "com.hourlock.app",
 )
 
+/**
+ * Packages representing system UI, keyboards, or input methods that should
+ * NOT trigger an app switch or cancel tracking when they appear over a monitored app.
+ */
+val TRANSIENT_SYSTEM_PACKAGES = setOf(
+    "android",
+    "com.android.systemui",
+    "com.samsung.android.honeyboard",       // Samsung Keyboard
+    "com.google.android.inputmethod.latin", // Gboard
+    "com.touchtype.swiftkey",               // SwiftKey
+)
+
 // ── Repository class ───────────────────────────────────────────────────────────
 
 class PrefsRepository(private val context: Context) {
@@ -179,12 +191,12 @@ class PrefsRepository(private val context: Context) {
     suspend fun getUsedSeconds(pkg: String): Int {
         val prefs = dataStore.data.first()
         val hourStart = prefs[hourStartKey(pkg)] ?: 0L
-        val now = System.currentTimeMillis()
-        return if (now - hourStart >= 3_600_000L) {
-            // New hour — reset
+        val currentHour = currentHourStartMillis()
+        return if (hourStart != currentHour) {
+            // New clock hour — reset
             dataStore.edit { p ->
                 p[usedSecondsKey(pkg)] = 0
-                p[hourStartKey(pkg)] = currentHourStartMillis()
+                p[hourStartKey(pkg)] = currentHour
             }
             0
         } else {
@@ -202,10 +214,10 @@ class PrefsRepository(private val context: Context) {
         var newValue = 0
         dataStore.edit { prefs ->
             val hourStart = prefs[hourStartKey(pkg)] ?: 0L
-            val now = System.currentTimeMillis()
-            val current = if (now - hourStart >= 3_600_000L) {
+            val currentHour = currentHourStartMillis()
+            val current = if (hourStart != currentHour) {
                 // Hour rolled over mid-session — reset before incrementing
-                prefs[hourStartKey(pkg)] = currentHourStartMillis()
+                prefs[hourStartKey(pkg)] = currentHour
                 0
             } else {
                 prefs[usedSecondsKey(pkg)] ?: 0
@@ -217,19 +229,29 @@ class PrefsRepository(private val context: Context) {
     }
 
     /**
-     * Returns the epoch millis of the start of the current clock hour.
+     * Returns the epoch millis of the start of the current local clock hour.
      * E.g. at 14:37:22, this returns the millis for 14:00:00.
      */
     fun currentHourStartMillis(): Long {
-        val now = System.currentTimeMillis()
-        return now - (now % 3_600_000L)
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
     }
 
     /**
      * Returns the epoch millis of the START of the NEXT clock hour.
      * Used by BlockedActivity to display "unlocks at XX:00".
      */
-    fun nextHourStartMillis(): Long = currentHourStartMillis() + 3_600_000L
+    fun nextHourStartMillis(): Long {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        cal.add(java.util.Calendar.HOUR_OF_DAY, 1)
+        return cal.timeInMillis
+    }
 
     // ─── Per-package limit ─────────────────────────────────────────────────
 
@@ -291,12 +313,9 @@ class PrefsRepository(private val context: Context) {
             cal.set(java.util.Calendar.SECOND, 0)
             cal.set(java.util.Calendar.MILLISECOND, 0)
             val startOfDay = cal.timeInMillis
-            val stats = usm.queryUsageStats(
-                android.app.usage.UsageStatsManager.INTERVAL_DAILY,
-                startOfDay,
-                System.currentTimeMillis()
-            )
-            stats?.find { it.packageName == pkg }?.totalTimeInForeground?.div(1000L) ?: 0L
+            val now = System.currentTimeMillis()
+            val statsMap = usm.queryAndAggregateUsageStats(startOfDay, now)
+            statsMap[pkg]?.totalTimeInForeground?.div(1000L) ?: 0L
         } catch (e: Exception) {
             0L
         }

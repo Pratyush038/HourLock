@@ -229,10 +229,19 @@ fun SettingsScreen(onBack: () -> Unit) {
                                     ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
                                 )
                             } catch (e: Exception) {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                                        .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
-                                )
+                                try {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.parse("package:${context.packageName}")
+                                        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                                    )
+                                } catch (e2: Exception) {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                            .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                                    )
+                                }
                             }
                         }
                     )
