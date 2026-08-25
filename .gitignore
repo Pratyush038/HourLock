@@ -19,3 +19,7 @@ captures/
 
 # Kotlin scratch files
 *.kts.user
+
+# Android SDK
+android-sdk/
+*.zip

@@ -30,7 +30,7 @@ jobs:
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
             echo "=== FULL BUILD LOG ==="
-            tail -n 150 build_log.txt
+            cat build_log.txt
             exit $EXIT_CODE
           fi
 
