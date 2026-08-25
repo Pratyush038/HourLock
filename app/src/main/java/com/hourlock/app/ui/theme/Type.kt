@@ -13,7 +13,21 @@ import androidx.compose.ui.unit.sp
  * Uses Space Grotesk / Inter styling (with SansSerif fallback).
  */
 
-val AppFontFamily: FontFamily = FontFamily.SansSerif
+import androidx.compose.ui.text.font.Font
+import com.hourlock.app.R
+
+val AppFontFamily = FontFamily(
+    Font(R.font.inter_regular, FontWeight.Normal),
+    Font(R.font.inter_medium, FontWeight.Medium),
+    Font(R.font.inter_semibold, FontWeight.SemiBold),
+    Font(R.font.inter_bold, FontWeight.Bold)
+)
+
+val WordmarkFont = FontFamily(
+    Font(R.font.raleway_thin, FontWeight.Thin),
+    Font(R.font.raleway_regular, FontWeight.Normal)
+)
+
 
 val Typography = Typography(
     displayLarge = TextStyle(

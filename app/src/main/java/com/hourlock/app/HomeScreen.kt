@@ -71,6 +71,7 @@ import com.hourlock.app.ui.components.RingProgress
 import com.hourlock.app.ui.components.RoundedCard
 import com.hourlock.app.ui.components.StatChip
 import com.hourlock.app.ui.theme.DesignTokens
+import com.hourlock.app.ui.theme.WordmarkFont
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -168,8 +169,9 @@ fun HomeScreen(
                     Column {
                         Text(
                             text = "HOURLOCK",
+                            fontFamily = WordmarkFont,
                             style = DesignTokens.Typography.title().copy(
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Thin,
                                 color = DesignTokens.Palette.PureWhite,
                                 letterSpacing = 2.sp
                             )
