@@ -24,14 +24,12 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
-        # --stacktrace gives detailed error output if the build fails
-        # --no-daemon prevents the Gradle daemon from persisting across CI steps
+        run: ./gradlew assembleDebug --stacktrace --info --no-daemon
 
       - name: Upload debug APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: hourlock-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
-          # artifact expires after 7 days by default (GitHub free plan)
           retention-days: 7
