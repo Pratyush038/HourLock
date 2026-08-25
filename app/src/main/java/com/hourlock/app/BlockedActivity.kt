@@ -4,9 +4,11 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.HapticFeedbackConstants
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -25,7 +27,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
@@ -45,21 +46,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hourlock.app.ui.theme.DarkBackground
-import com.hourlock.app.ui.theme.DarkBorder
-import com.hourlock.app.ui.theme.DarkBorderSubtle
-import com.hourlock.app.ui.theme.DarkSurfaceCard
-import com.hourlock.app.ui.theme.DarkSurfaceElevated
+import com.hourlock.app.ui.components.RingProgress
+import com.hourlock.app.ui.components.RoundedCard
+import com.hourlock.app.ui.theme.DesignTokens
 import com.hourlock.app.ui.theme.HourLockTheme
-import com.hourlock.app.ui.theme.PureBlack
-import com.hourlock.app.ui.theme.PureWhite
-import com.hourlock.app.ui.theme.TextMutedDark
-import com.hourlock.app.ui.theme.TextSecondaryDark
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -68,8 +66,12 @@ import java.util.Locale
 /**
  * BlockedActivity
  * ────────────────
- * Minimalist, strict lock screen overlay displayed when an app's
- * hourly quota is reached. No bypasses or emergency breaks.
+ * Strict fullscreen lock overlay displayed when an app reaches its hourly limit.
+ * Features:
+ *  - Live monospaced tabular countdown (no jitter / reflow)
+ *  - Haptic feedback tick on appearance
+ *  - Micro-pulsing lock geometry
+ *  - "Return to Home" primary action
  */
 class BlockedActivity : ComponentActivity() {
 
@@ -80,7 +82,7 @@ class BlockedActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val pkg = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE) ?: "Unknown App"
+        val pkg = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE) ?: "Monitored App"
         setContent {
             HourLockTheme(darkTheme = true) {
                 BlockedScreen(
@@ -94,7 +96,7 @@ class BlockedActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val pkg = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE) ?: "Unknown App"
+        val pkg = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE) ?: "Monitored App"
         setContent {
             HourLockTheme(darkTheme = true) {
                 BlockedScreen(
@@ -115,22 +117,26 @@ class BlockedActivity : ComponentActivity() {
     }
 }
 
-// ─── COMPOSE UI ────────────────────────────────────────────────────────────────
-
 @Composable
 fun BlockedScreen(
     blockedPackage: String,
     onGoHome: () -> Unit
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
     val repo = remember { PrefsRepository(context) }
     val appLabel = remember(blockedPackage) { getAppLabel(context, blockedPackage) }
 
-    // ── Countdown to next hour ─────────────────────────────────────────────
+    // Countdown state
     var secondsUntilUnlock by remember { mutableIntStateOf(0) }
     var nextHourFormatted by remember { mutableStateOf("") }
 
+    // Trigger haptic feedback on appear
     LaunchedEffect(Unit) {
+        try {
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        } catch (_: Exception) {}
+
         val sdf = SimpleDateFormat("h:00 a", Locale.getDefault())
         while (true) {
             val nextHourMillis = repo.nextHourStartMillis()
@@ -141,13 +147,13 @@ fun BlockedScreen(
         }
     }
 
-    // Pulsing animation
+    // Subtle breathing pulse for lock icon
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = 1.05f,
+        targetValue = 1.04f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = LinearEasing),
+            animation = tween(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "lockPulse"
@@ -155,7 +161,7 @@ fun BlockedScreen(
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = DarkBackground
+        color = DesignTokens.Palette.DarkBackground
     ) {
         Box(
             modifier = Modifier
@@ -168,114 +174,131 @@ fun BlockedScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Lock Icon Container
-                Surface(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .scale(pulseScale),
-                    shape = CircleShape,
-                    color = DarkSurfaceCard,
-                    border = BorderStroke(1.dp, DarkBorder)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Filled.Lock,
-                            contentDescription = "Locked",
-                            tint = PureWhite,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
-                }
+                // Circular Progress Ring showing remaining fraction of the hour
+                val hourRemainingFraction = (secondsUntilUnlock.toFloat() / 3600f).coerceIn(0f, 1f)
 
-                Spacer(Modifier.height(24.dp))
+                RingProgress(
+                    progress = hourRemainingFraction,
+                    size = 130.dp,
+                    strokeWidth = 8.dp,
+                    trackColor = DesignTokens.Palette.DarkElevated,
+                    progressColor = DesignTokens.Palette.WarningAccent,
+                    warningColor = DesignTokens.Palette.WarningAccent,
+                    isWarningOrBlocked = true,
+                    content = {
+                        Surface(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .scale(pulseScale),
+                            shape = CircleShape,
+                            color = DesignTokens.Palette.DarkCard,
+                            border = BorderStroke(1.dp, DesignTokens.Palette.WarningAccentBorder)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.Lock,
+                                    contentDescription = "Locked",
+                                    tint = DesignTokens.Palette.WarningAccent,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+                    }
+                )
+
+                Spacer(Modifier.height(28.dp))
 
                 // Blocked App Pill Badge
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = DarkSurfaceElevated,
-                    border = BorderStroke(1.dp, DarkBorderSubtle)
+                    shape = DesignTokens.Shapes.Pill,
+                    color = DesignTokens.Palette.DarkElevated,
+                    border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
                 ) {
                     Text(
                         text = appLabel.uppercase(),
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = PureWhite,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        style = DesignTokens.Typography.caption().copy(
+                            color = DesignTokens.Palette.PureWhite,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp
+                            letterSpacing = 1.5.sp,
+                            fontSize = 11.sp
                         )
                     )
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(14.dp))
 
                 Text(
                     text = "Hour Limit Reached",
-                    style = MaterialTheme.typography.headlineMedium.copy(
+                    style = DesignTokens.Typography.display().copy(
                         fontWeight = FontWeight.Bold,
-                        color = PureWhite,
-                        textAlign = TextAlign.Center
+                        color = DesignTokens.Palette.PureWhite,
+                        textAlign = TextAlign.Center,
+                        fontSize = 28.sp
                     )
                 )
 
+                Spacer(Modifier.height(6.dp))
+
                 Text(
                     text = "Take a break. You've reached your screen budget for this clock hour.",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = TextSecondaryDark,
+                    style = DesignTokens.Typography.body().copy(
+                        color = DesignTokens.Palette.GraySecondary,
                         textAlign = TextAlign.Center,
                         lineHeight = 22.sp
                     ),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp)
                 )
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(28.dp))
 
-                // Countdown Pill Card
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    color = DarkSurfaceCard,
-                    border = BorderStroke(1.dp, DarkBorder)
+                // Countdown Card with Tabular Monospaced Numbers
+                RoundedCard(
+                    shape = DesignTokens.Shapes.Card,
+                    containerColor = DesignTokens.Palette.DarkCard,
+                    borderColor = DesignTokens.Palette.DarkBorder,
+                    contentPadding = 20.dp
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
                             Text(
                                 "NEXT RESET AT",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = TextMutedDark,
-                                    letterSpacing = 1.sp,
-                                    fontWeight = FontWeight.Bold
+                                style = DesignTokens.Typography.caption().copy(
+                                    color = DesignTokens.Palette.GrayMuted,
+                                    letterSpacing = 1.2.sp,
+                                    fontSize = 10.sp
                                 )
                             )
+                            Spacer(Modifier.height(2.dp))
                             Text(
                                 nextHourFormatted,
-                                style = MaterialTheme.typography.titleLarge.copy(
+                                style = DesignTokens.Typography.title().copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = PureWhite
+                                    color = DesignTokens.Palette.PureWhite,
+                                    fontSize = 20.sp
                                 )
                             )
                         }
 
-                        // Time remaining
+                        // Jitter-free Monospaced Digits
                         val minutesLeft = secondsUntilUnlock / 60
                         val secondsLeft = secondsUntilUnlock % 60
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = DarkSurfaceElevated,
-                            border = BorderStroke(1.dp, DarkBorderSubtle)
+                            shape = DesignTokens.Shapes.Button,
+                            color = DesignTokens.Palette.DarkElevated,
+                            border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorderSubtle)
                         ) {
                             Text(
-                                text = String.format("%02d:%02d", minutesLeft, secondsLeft),
+                                text = String.format(Locale.US, "%02d:%02d", minutesLeft, secondsLeft),
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = PureWhite
-                                )
+                                style = DesignTokens.Typography.monospacedNumber(
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold
+                                ).copy(color = DesignTokens.Palette.PureWhite)
                             )
                         }
                     }
@@ -285,14 +308,19 @@ fun BlockedScreen(
 
                 // Primary Return Home Button
                 Button(
-                    onClick = onGoHome,
+                    onClick = {
+                        try {
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        } catch (_: Exception) {}
+                        onGoHome()
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = DesignTokens.Shapes.Button,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = PureWhite,
-                        contentColor = PureBlack
+                        containerColor = DesignTokens.Palette.PureWhite,
+                        contentColor = DesignTokens.Palette.PureBlack
                     )
                 ) {
                     Row(
@@ -302,7 +330,10 @@ fun BlockedScreen(
                         Icon(Icons.Filled.Home, contentDescription = null, modifier = Modifier.size(20.dp))
                         Text(
                             "Return to Home",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            style = DesignTokens.Typography.subtitle().copy(
+                                fontWeight = FontWeight.Bold,
+                                color = DesignTokens.Palette.PureBlack
+                            )
                         )
                     }
                 }
@@ -316,7 +347,7 @@ private fun getAppLabel(context: Context, pkg: String): String {
         val pm = context.packageManager
         val info = pm.getApplicationInfo(pkg, 0)
         pm.getApplicationLabel(info).toString()
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
     }
 }

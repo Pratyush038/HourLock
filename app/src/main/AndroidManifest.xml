@@ -120,6 +120,19 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- ─── Home Screen Widget Receiver (Glance) ────────────────────────── -->
+        <receiver
+            android:name=".widget.HourLockWidgetReceiver"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/hourlock_widget_info" />
+        </receiver>
+
     </application>
 
 </manifest>

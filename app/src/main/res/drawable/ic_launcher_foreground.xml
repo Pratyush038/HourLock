@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Group centered at (54, 54) inside safe area -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54">
+
+        <!-- Outer Progress Arc (270-degree clock ring stroke matching Home screen) -->
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000"
+            android:pathData="M 54,28 A 26,26 0 1,1 28,54" />
+
+        <!-- Minimalist Padlock Shackle -->
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="3.5"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000"
+            android:pathData="M 47,52 L 47,46 A 7,7 0 0,1 61,46 L 61,52" />
+
+        <!-- Minimalist Padlock Body -->
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="3"
+            android:fillColor="#FFFFFF"
+            android:pathData="M 43,52 L 65,52 A 3,3 0 0,1 68,55 L 68,66 A 3,3 0 0,1 65,69 L 43,69 A 3,3 0 0,1 40,66 L 40,55 A 3,3 0 0,1 43,52 Z" />
+
+        <!-- Padlock Keyhole Dot (Inverted Dark) -->
+        <path
+            android:fillColor="#0A0A0A"
+            android:pathData="M 54,58 A 2,2 0 1,1 53.99,58 Z M 53,60 L 55,60 L 54.5,64 L 53.5,64 Z" />
+    </group>
+</vector>

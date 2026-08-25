@@ -5,7 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,29 +19,32 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Battery4Bar
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PauseCircle
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,42 +61,45 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hourlock.app.ui.theme.AccentGreen
-import com.hourlock.app.ui.theme.AccentOrange
-import com.hourlock.app.ui.theme.DarkBorder
-import com.hourlock.app.ui.theme.DarkBorderSubtle
-import com.hourlock.app.ui.theme.DarkSurfaceCard
-import com.hourlock.app.ui.theme.DarkSurfaceElevated
-import com.hourlock.app.ui.theme.PureBlack
-import com.hourlock.app.ui.theme.PureWhite
-import com.hourlock.app.ui.theme.TextMutedDark
-import com.hourlock.app.ui.theme.TextSecondaryDark
+import com.hourlock.app.ui.components.MonochromeSlider
+import com.hourlock.app.ui.components.MonochromeSwitch
+import com.hourlock.app.ui.components.RoundedCard
+import com.hourlock.app.ui.theme.DesignTokens
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
  * SettingsScreen
  * ──────────────
- * Minimalist monochromatic settings:
- *  1. Permissions status (Accessibility, Usage Access, Battery)
- *  2. Monitored apps with individual limit sliders
- *  3. Privacy & Safety manifesto
+ * Cleanly organized settings grouped into rounded cards:
+ *  1. System Permissions (with green/red status dots & inline grant)
+ *  2. Monitored Apps (with per-app limit sliders)
+ *  3. Blocking Behavior (master toggle & rolling window info)
+ *  4. Privacy & Safety Manifesto
+ *  5. Danger Zone (pause, disable, reset data)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val view = LocalView.current
     val repo = remember { PrefsRepository(context) }
     val scope = rememberCoroutineScope()
 
     val monitoredPackages by repo.monitoredPackagesFlow.collectAsState(initial = setOf("com.instagram.android"))
+    val blockingEnabled by repo.blockingEnabledFlow.collectAsState(initial = true)
+    val pauseUntil by repo.pauseUntilFlow.collectAsState(initial = 0L)
+    val isPaused = System.currentTimeMillis() < pauseUntil
 
     var a11yGranted by remember { mutableStateOf(false) }
     var usageGranted by remember { mutableStateOf(false) }
     var batteryOptExempt by remember { mutableStateOf(false) }
+
+    var showResetDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -100,21 +108,22 @@ fun SettingsScreen(onBack: () -> Unit) {
             batteryOptExempt = try {
                 val pm = context.getSystemService(PowerManager::class.java)
                 pm.isIgnoringBatteryOptimizations(context.packageName)
-            } catch (e: Exception) { false }
+            } catch (_: Exception) { false }
             delay(2000L)
         }
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = DesignTokens.Palette.DarkBackground,
         topBar = {
             LargeTopAppBar(
                 title = {
                     Text(
                         "Settings",
-                        style = MaterialTheme.typography.headlineMedium.copy(
+                        style = DesignTokens.Typography.title().copy(
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
+                            color = DesignTokens.Palette.PureWhite,
+                            fontSize = 24.sp
                         )
                     )
                 },
@@ -123,7 +132,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = PureWhite
+                            tint = DesignTokens.Palette.PureWhite
                         )
                     }
                 },
@@ -138,28 +147,29 @@ fun SettingsScreen(onBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = DesignTokens.Spacing.xl),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.lg)
         ) {
-            // ── PERMISSIONS SECTION ────────────────────────────────────────────
+            // ── 1. SYSTEM PERMISSIONS ──────────────────────────────────────────
             item {
-                SectionTitle("SYSTEM PERMISSIONS")
+                SectionHeader("PERMISSIONS")
             }
 
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
-                    border = BorderStroke(1.dp, DarkBorder)
+                RoundedCard(
+                    shape = DesignTokens.Shapes.Card,
+                    containerColor = DesignTokens.Palette.DarkCard,
+                    borderColor = DesignTokens.Palette.DarkBorder,
+                    contentPadding = 16.dp
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        PermissionItem(
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        PermissionRowItem(
                             label = "Accessibility Service",
-                            description = "Real-time app detection",
+                            description = "Foreground app detection & quota enforcement",
                             icon = Icons.Filled.Lock,
                             granted = a11yGranted,
-                            onClick = {
+                            onGrant = {
+                                try { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) } catch (_: Exception) {}
                                 context.startActivity(
                                     Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                                         .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
@@ -167,12 +177,15 @@ fun SettingsScreen(onBack: () -> Unit) {
                             }
                         )
 
-                        PermissionItem(
+                        HorizontalDivider(color = DesignTokens.Palette.DarkBorderSubtle, thickness = 0.5.dp)
+
+                        PermissionRowItem(
                             label = "Usage Access",
-                            description = "Daily screen time aggregation",
+                            description = "Daily screen time calculation & statistics",
                             icon = Icons.Filled.Timer,
                             granted = usageGranted,
-                            onClick = {
+                            onGrant = {
+                                try { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) } catch (_: Exception) {}
                                 context.startActivity(
                                     Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
                                         .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
@@ -180,12 +193,15 @@ fun SettingsScreen(onBack: () -> Unit) {
                             }
                         )
 
-                        PermissionItem(
+                        HorizontalDivider(color = DesignTokens.Palette.DarkBorderSubtle, thickness = 0.5.dp)
+
+                        PermissionRowItem(
                             label = "Battery Exemption",
-                            description = "Prevents background process kill",
+                            description = "Prevents aggressive OS background killing",
                             icon = Icons.Filled.Battery4Bar,
                             granted = batteryOptExempt,
-                            onClick = {
+                            onGrant = {
+                                try { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) } catch (_: Exception) {}
                                 try {
                                     context.startActivity(
                                         Intent(
@@ -193,20 +209,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                                             Uri.parse("package:${context.packageName}")
                                         ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
                                     )
-                                } catch (e: Exception) {
-                                    try {
-                                        context.startActivity(
-                                            Intent(
-                                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                                Uri.parse("package:${context.packageName}")
-                                            ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
-                                        )
-                                    } catch (e2: Exception) {
-                                        context.startActivity(
-                                            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                                                .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
-                                        )
-                                    }
+                                } catch (_: Exception) {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                            .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                                    )
                                 }
                             }
                         )
@@ -214,135 +221,363 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ── MONITORED APPS BUDGET ──────────────────────────────────────────
+            // ── 2. MONITORED APPS BUDGETS ──────────────────────────────────────
             item {
-                SectionTitle("HOURLY BUDGETS")
+                SectionHeader("MONITORED APPS BUDGETS")
             }
 
-            items(monitoredPackages.toList()) { pkg ->
-                MonitoredAppBudgetCard(
-                    pkg = pkg,
-                    repo = repo,
-                    onRemove = {
-                        scope.launch {
-                            repo.setMonitoredPackages(monitoredPackages - pkg)
+            if (monitoredPackages.isEmpty()) {
+                item {
+                    Text(
+                        "No apps monitored yet. Add apps from the Home screen.",
+                        style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.GrayMuted),
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
+            } else {
+                items(monitoredPackages.toList()) { pkg ->
+                    MonitoredAppBudgetRowCard(
+                        pkg = pkg,
+                        repo = repo,
+                        onRemove = {
+                            scope.launch {
+                                repo.setMonitoredPackages(monitoredPackages - pkg)
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
 
-            // ── PRIVACY & SAFETY CARD ──────────────────────────────────────────
+            // ── 3. BLOCKING BEHAVIOR ───────────────────────────────────────────
             item {
-                SectionTitle("SAFETY & OFFLINE PRIVACY")
+                SectionHeader("BLOCKING BEHAVIOR")
             }
 
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
-                    border = BorderStroke(1.dp, DarkBorder)
+                RoundedCard(
+                    shape = DesignTokens.Shapes.Card,
+                    containerColor = DesignTokens.Palette.DarkCard,
+                    borderColor = DesignTokens.Palette.DarkBorder,
+                    contentPadding = 18.dp
                 ) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Enforce Hourly Limits",
+                                style = DesignTokens.Typography.subtitle().copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = DesignTokens.Palette.PureWhite,
+                                    fontSize = 15.sp
+                                )
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "Instantly overlays lock screen when an app hits its hourly limit",
+                                style = DesignTokens.Typography.bodySmall().copy(
+                                    color = DesignTokens.Palette.GraySecondary,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
+
+                        Spacer(Modifier.width(12.dp))
+
+                        MonochromeSwitch(
+                            checked = blockingEnabled,
+                            onCheckedChange = { scope.launch { repo.setBlockingEnabled(it) } }
+                        )
+                    }
+                }
+            }
+
+            // ── 4. OFFLINE & PRIVACY MANIFESTO ─────────────────────────────────
+            item {
+                SectionHeader("OFFLINE & PRIVACY MANIFESTO")
+            }
+
+            item {
+                RoundedCard(
+                    shape = DesignTokens.Shapes.Card,
+                    containerColor = DesignTokens.Palette.DarkCard,
+                    borderColor = DesignTokens.Palette.DarkBorder,
+                    contentPadding = 18.dp
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Filled.Security, contentDescription = null, tint = PureWhite)
+                            Icon(Icons.Filled.Security, contentDescription = null, tint = DesignTokens.Palette.PureWhite)
                             Text(
                                 "100% Offline & Private",
-                                style = MaterialTheme.typography.titleMedium.copy(
+                                style = DesignTokens.Typography.subtitle().copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = PureWhite
+                                    color = DesignTokens.Palette.PureWhite,
+                                    fontSize = 15.sp
                                 )
                             )
                         }
                         Text(
-                            "• Zero network permissions — no data can leave your device.\n• Strict locking — no emergency bypasses.\n• Window content inspection disabled — cannot read text or passwords.\n• Never blocks emergency dialers, camera, or system settings.",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = TextSecondaryDark,
-                                lineHeight = 20.sp
+                            "• Zero network permissions — no data can leave your device.\n• Window content inspection disabled — cannot read text or passwords.\n• Never blocks emergency phone dialers, camera, or system settings.",
+                            style = DesignTokens.Typography.bodySmall().copy(
+                                color = DesignTokens.Palette.GraySecondary,
+                                lineHeight = 19.sp,
+                                fontSize = 12.sp
                             )
                         )
                     }
                 }
             }
 
-            item { Spacer(Modifier.height(32.dp)) }
+            // ── 5. DANGER ZONE ─────────────────────────────────────────────────
+            item {
+                SectionHeader("DANGER ZONE")
+            }
+
+            item {
+                RoundedCard(
+                    shape = DesignTokens.Shapes.Card,
+                    containerColor = DesignTokens.Palette.DarkCard,
+                    borderColor = DesignTokens.Palette.DarkBorderSubtle,
+                    contentPadding = 18.dp
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        // Pause Blocking Row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        if (isPaused) repo.clearPause() else repo.pauseForOneHour()
+                                    }
+                                },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.PauseCircle,
+                                    contentDescription = null,
+                                    tint = if (isPaused) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.GrayMuted,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = if (isPaused) "Resume Blocking" else "Pause for 1 Hour",
+                                        style = DesignTokens.Typography.bodyMedium().copy(
+                                            color = if (isPaused) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.PureWhite,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    )
+                                    Text(
+                                        text = if (isPaused) "Pause currently active" else "Temporarily disable lock enforcement",
+                                        style = DesignTokens.Typography.bodySmall().copy(
+                                            color = DesignTokens.Palette.GrayMuted,
+                                            fontSize = 11.sp
+                                        )
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = if (isPaused) "RESUME" else "PAUSE",
+                                style = DesignTokens.Typography.caption().copy(
+                                    color = if (isPaused) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.PureWhite,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                )
+                            )
+                        }
+
+                        HorizontalDivider(color = DesignTokens.Palette.DarkBorderSubtle, thickness = 0.5.dp)
+
+                        // Reset All Usage Data Row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showResetDialog = true },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = DesignTokens.Palette.GrayMuted,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "Reset Current Hour Counters",
+                                        style = DesignTokens.Typography.bodyMedium().copy(
+                                            color = DesignTokens.Palette.PureWhite,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    )
+                                    Text(
+                                        text = "Clears accumulated seconds for this clock hour",
+                                        style = DesignTokens.Typography.bodySmall().copy(
+                                            color = DesignTokens.Palette.GrayMuted,
+                                            fontSize = 11.sp
+                                        )
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = "RESET",
+                                style = DesignTokens.Typography.caption().copy(
+                                    color = DesignTokens.Palette.GrayMuted,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(DesignTokens.Spacing.xxl)) }
         }
+    }
+
+    // ── RESET CONFIRMATION DIALOG ──────────────────────────────────────────
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            containerColor = DesignTokens.Palette.DarkCard,
+            shape = DesignTokens.Shapes.Card,
+            title = {
+                Text(
+                    "Reset Usage Counters?",
+                    style = DesignTokens.Typography.title().copy(
+                        fontWeight = FontWeight.Bold,
+                        color = DesignTokens.Palette.PureWhite
+                    )
+                )
+            },
+            text = {
+                Text(
+                    "This will reset your current hour usage counters back to 0 for all monitored apps.",
+                    style = DesignTokens.Typography.body().copy(color = DesignTokens.Palette.GraySecondary)
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            for (pkg in monitoredPackages) {
+                                repo.setLimitMinutes(pkg, repo.getLimitSeconds(pkg) / 60)
+                            }
+                            showResetDialog = false
+                        }
+                    }
+                ) {
+                    Text("Reset", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel", color = DesignTokens.Palette.GrayMuted)
+                }
+            }
+        )
     }
 }
 
-// ─── PERMISSION ITEM ───────────────────────────────────────────────────────────
+// ─── PERMISSION ROW ITEM ───────────────────────────────────────────────────────
 
 @Composable
-private fun PermissionItem(
+private fun PermissionRowItem(
     label: String,
     description: String,
     icon: ImageVector,
     granted: Boolean,
-    onClick: () -> Unit
+    onGrant: () -> Unit
 ) {
-    Surface(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .clickable { onClick() },
-        color = DarkSurfaceElevated,
-        border = BorderStroke(1.dp, DarkBorderSubtle)
+            .clickable { onGrant() }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        // Icon
+        Surface(
+            modifier = Modifier.size(36.dp),
+            shape = DesignTokens.Shapes.Pill,
+            color = DesignTokens.Palette.DarkElevated
         ) {
-            Surface(
-                modifier = Modifier.size(36.dp),
-                shape = CircleShape,
-                color = if (granted) PureBlack else AccentOrange.copy(alpha = 0.15f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = if (granted) PureWhite else AccentOrange,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = DesignTokens.Palette.PureWhite,
+                    modifier = Modifier.size(18.dp)
+                )
             }
+        }
 
-            Column(modifier = Modifier.weight(1f)) {
+        // Details
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Status Dot (the only place where green/red dot is allowed)
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (granted) DesignTokens.Palette.StatusSuccess else DesignTokens.Palette.StatusError)
+                )
+
                 Text(
                     text = label,
-                    style = MaterialTheme.typography.bodyMedium.copy(
+                    style = DesignTokens.Typography.bodyMedium().copy(
                         fontWeight = FontWeight.SemiBold,
-                        color = PureWhite
+                        color = DesignTokens.Palette.PureWhite,
+                        fontSize = 14.sp
                     )
-                )
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.labelSmall.copy(color = TextMutedDark)
                 )
             }
 
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = if (granted) AccentGreen.copy(alpha = 0.15f) else AccentOrange.copy(alpha = 0.15f),
-                border = BorderStroke(1.dp, if (granted) AccentGreen.copy(alpha = 0.4f) else AccentOrange.copy(alpha = 0.4f))
-            ) {
-                Text(
-                    text = if (granted) "GRANTED" else "REQUIRED",
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = if (granted) AccentGreen else AccentOrange,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 9.sp
-                    )
+            Text(
+                text = description,
+                style = DesignTokens.Typography.bodySmall().copy(
+                    color = DesignTokens.Palette.GrayMuted,
+                    fontSize = 11.sp
                 )
-            }
+            )
+        }
+
+        // Grant / Granted Pill
+        Surface(
+            shape = DesignTokens.Shapes.Chip,
+            color = if (granted) DesignTokens.Palette.StatusSuccessMuted else DesignTokens.Palette.PureWhite,
+            border = BorderStroke(1.dp, if (granted) DesignTokens.Palette.StatusSuccess.copy(alpha = 0.3f) else DesignTokens.Palette.PureWhite)
+        ) {
+            Text(
+                text = if (granted) "GRANTED" else "GRANT",
+                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                style = DesignTokens.Typography.caption().copy(
+                    color = if (granted) DesignTokens.Palette.StatusSuccess else DesignTokens.Palette.PureBlack,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp,
+                    letterSpacing = 0.8.sp
+                )
+            )
         }
     }
 }
@@ -350,7 +585,7 @@ private fun PermissionItem(
 // ─── MONITORED APP BUDGET CARD ─────────────────────────────────────────────────
 
 @Composable
-private fun MonitoredAppBudgetCard(
+private fun MonitoredAppBudgetRowCard(
     pkg: String,
     repo: PrefsRepository,
     onRemove: () -> Unit
@@ -363,94 +598,85 @@ private fun MonitoredAppBudgetCard(
 
     var sliderValue by remember(limitMin) { mutableFloatStateOf(limitMin.toFloat()) }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
-        border = BorderStroke(1.dp, DarkBorder)
+    RoundedCard(
+        shape = DesignTokens.Shapes.Card,
+        containerColor = DesignTokens.Palette.DarkCard,
+        borderColor = DesignTokens.Palette.DarkBorder,
+        contentPadding = 16.dp
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                Surface(
+                    modifier = Modifier.size(34.dp),
+                    shape = DesignTokens.Shapes.Badge,
+                    color = DesignTokens.Palette.DarkElevated
                 ) {
-                    Surface(
-                        modifier = Modifier.size(36.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        color = DarkSurfaceElevated
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = appLabel.take(1).uppercase(),
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = PureWhite
-                                )
-                            )
-                        }
-                    }
-
-                    Column {
+                    Box(contentAlignment = Alignment.Center) {
                         Text(
-                            text = appLabel,
-                            style = MaterialTheme.typography.titleMedium.copy(
+                            text = appLabel.take(1).uppercase(),
+                            style = DesignTokens.Typography.caption().copy(
                                 fontWeight = FontWeight.Bold,
-                                color = PureWhite
+                                color = DesignTokens.Palette.PureWhite
                             )
-                        )
-                        Text(
-                            text = "${sliderValue.toInt()} min / hour",
-                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondaryDark)
                         )
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onRemove) {
-                        Icon(Icons.Filled.Close, contentDescription = "Remove", tint = TextMutedDark)
-                    }
+                Column {
+                    Text(
+                        text = appLabel,
+                        style = DesignTokens.Typography.subtitle().copy(
+                            fontWeight = FontWeight.Bold,
+                            color = DesignTokens.Palette.PureWhite,
+                            fontSize = 15.sp
+                        )
+                    )
+                    Text(
+                        text = "${sliderValue.toInt()} min / hour budget",
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.GraySecondary,
+                            fontSize = 12.sp
+                        )
+                    )
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
-
-            Slider(
-                value = sliderValue,
-                onValueChange = { sliderValue = it },
-                onValueChangeFinished = {
-                    scope.launch {
-                        repo.setLimitMinutes(pkg, sliderValue.toInt())
-                    }
-                },
-                valueRange = 1f..60f,
-                steps = 58,
-                colors = SliderDefaults.colors(
-                    thumbColor = PureWhite,
-                    activeTrackColor = PureWhite,
-                    inactiveTrackColor = DarkSurfaceElevated
-                )
-            )
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Filled.Close, contentDescription = "Remove", tint = DesignTokens.Palette.GrayMuted, modifier = Modifier.size(18.dp))
+            }
         }
+
+        Spacer(Modifier.height(8.dp))
+
+        MonochromeSlider(
+            value = sliderValue,
+            onValueChange = { sliderValue = it },
+            onValueChangeFinished = {
+                scope.launch {
+                    repo.setLimitMinutes(pkg, sliderValue.toInt())
+                }
+            },
+            valueRange = 1f..60f,
+            steps = 58
+        )
     }
 }
 
-// ─── SECTION TITLE ─────────────────────────────────────────────────────────────
+// ─── SECTION HEADER ────────────────────────────────────────────────────────────
 
 @Composable
-private fun SectionTitle(title: String) {
+private fun SectionHeader(title: String) {
     Text(
         text = title,
-        style = MaterialTheme.typography.labelSmall.copy(
-            color = TextMutedDark,
+        style = DesignTokens.Typography.caption().copy(
+            color = DesignTokens.Palette.GrayMuted,
             letterSpacing = 1.5.sp,
             fontWeight = FontWeight.Bold
         ),
@@ -463,7 +689,7 @@ private fun getAppLabel(context: Context, pkg: String): String {
         val pm = context.packageManager
         val info = pm.getApplicationInfo(pkg, 0)
         pm.getApplicationLabel(info).toString()
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
     }
 }

@@ -107,6 +107,9 @@ dependencies {
     // timer tick so nothing is lost if the process is killed abruptly.
     implementation(libs.androidx.datastore.preferences)
 
+    // ── Glance AppWidget ──────────────────────────────────────────────────
+    implementation(libs.androidx.glance.appwidget)
+
     // ── Coroutines ────────────────────────────────────────────────────────
     implementation(libs.kotlinx.coroutines.android)
 

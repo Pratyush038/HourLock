@@ -62,6 +62,8 @@ class UsageTrackerService : AccessibilityService() {
     @Volatile private var cachedPauseUntil: Long = 0L
 
     private lateinit var repo: PrefsRepository
+    private lateinit var analyticsRepo: com.hourlock.app.data.UsageLogRepository
+    private var lastTrackedHour: Int = -1
 
     // ── Service lifecycle ──────────────────────────────────────────────────
 
@@ -69,6 +71,7 @@ class UsageTrackerService : AccessibilityService() {
         try {
             super.onServiceConnected()
             repo = PrefsRepository(applicationContext)
+            analyticsRepo = com.hourlock.app.data.UsageLogRepository(applicationContext)
 
             // Set service info dynamically as a safety belt alongside the XML
             // config — ensures we only receive the events we declared.
@@ -244,6 +247,18 @@ class UsageTrackerService : AccessibilityService() {
         // Increment and persist (also handles hour rollover inside repo)
         val used = repo.incrementUsedSeconds(pkg)
 
+        // Additive analytics: snapshot when hour changes
+        val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (lastTrackedHour != -1 && lastTrackedHour != currentHour) {
+            val prevHour = lastTrackedHour
+            serviceScope.launch {
+                try {
+                    analyticsRepo.logHourSnapshot(pkg, used, wasBlocked = false)
+                } catch (_: Exception) {}
+            }
+        }
+        lastTrackedHour = currentHour
+
         // Skip blocking checks if master toggle off or paused
         if (!cachedBlockingEnabled) return
         if (System.currentTimeMillis() < cachedPauseUntil) return
@@ -251,6 +266,11 @@ class UsageTrackerService : AccessibilityService() {
         val limitSec = repo.getLimitSeconds(pkg)
         if (used >= limitSec) {
             Log.i(TAG, "$pkg reached limit ($used/$limitSec s) — launching BlockedActivity")
+            serviceScope.launch {
+                try {
+                    analyticsRepo.logHourSnapshot(pkg, used, wasBlocked = true)
+                } catch (_: Exception) {}
+            }
             launchBlockedActivity(pkg)
             // Stop the timer — BlockedActivity takes over until the next clock hour
             stopTimerIfRunning(reason = "limit reached for $pkg")

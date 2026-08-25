@@ -49,6 +49,9 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 # DataStore — used instead of raw SharedPreferences for coroutine-friendly access
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastorePreferences" }
 
+# Glance Widget
+androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version = "1.1.0" }
+
 # Coroutines
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 

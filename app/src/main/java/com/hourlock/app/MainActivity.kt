@@ -4,6 +4,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -13,14 +17,10 @@ import com.hourlock.app.ui.theme.HourLockTheme
 /**
  * MainActivity
  * ─────────────
- * Single-Activity host. Navigation is handled via Compose Navigation between
- * two destinations: "home" and "settings".
- *
- * We use a single-activity architecture intentionally:
- *  - Simpler process lifecycle management.
- *  - Compose Navigation handles back-stack automatically.
- *  - BlockedActivity is kept separate because it needs to overlay OTHER apps
- *    with FLAG_ACTIVITY_NEW_TASK, which requires its own Activity context.
+ * Single-Activity host hosting the Compose Navigation stack:
+ *  - "home": Dashboard with circular progress ring and app locks
+ *  - "stats": Analytics, weekly chart, and hourly heatmap
+ *  - "settings": Permissions, budget sliders, and danger zone
  */
 class MainActivity : ComponentActivity() {
 
@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            HourLockTheme {
+            HourLockTheme(darkTheme = true) {
                 HourLockNavHost()
             }
         }
@@ -41,11 +41,36 @@ fun HourLockNavHost() {
 
     NavHost(
         navController = navController,
-        startDestination = "home"
+        startDestination = "home",
+        enterTransition = {
+            fadeIn(animationSpec = tween(300)) + slideIntoContainer(
+                AnimatedContentTransitionScope.SlideDirection.Start,
+                animationSpec = tween(300)
+            )
+        },
+        exitTransition = {
+            fadeOut(animationSpec = tween(300))
+        },
+        popEnterTransition = {
+            fadeIn(animationSpec = tween(300))
+        },
+        popExitTransition = {
+            fadeOut(animationSpec = tween(300)) + slideOutOfContainer(
+                AnimatedContentTransitionScope.SlideDirection.End,
+                animationSpec = tween(300)
+            )
+        }
     ) {
         composable("home") {
             HomeScreen(
+                onNavigateToStats = { navController.navigate("stats") },
                 onNavigateToSettings = { navController.navigate("settings") }
+            )
+        }
+
+        composable("stats") {
+            StatsScreen(
+                onBack = { navController.popBackStack() }
             )
         }
 

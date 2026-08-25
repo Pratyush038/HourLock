@@ -12,89 +12,91 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// ── Monochromatic Black & White Design Tokens ─────────────────────────────────
+// ── Convenient Direct Aliases to DesignTokens ─────────────────────────────────
+val PureBlack = DesignTokens.Palette.PureBlack
+val DarkBackground = DesignTokens.Palette.DarkBackground
+val DarkSurface = DesignTokens.Palette.DarkSurface
+val DarkSurfaceCard = DesignTokens.Palette.DarkCard
+val DarkSurfaceElevated = DesignTokens.Palette.DarkElevated
+val DarkBorder = DesignTokens.Palette.DarkBorder
+val DarkBorderSubtle = DesignTokens.Palette.DarkBorderSubtle
 
-val PureBlack = Color(0xFF000000)
-val DarkBackground = Color(0xFF09090B)
-val DarkSurface = Color(0xFF121215)
-val DarkSurfaceCard = Color(0xFF18181C)
-val DarkSurfaceElevated = Color(0xFF222228)
-val DarkBorder = Color(0xFF27272E)
-val DarkBorderSubtle = Color(0xFF1C1C22)
+val PureWhite = DesignTokens.Palette.PureWhite
+val TextPrimaryDark = DesignTokens.Palette.PureWhite
+val TextSecondaryDark = DesignTokens.Palette.GraySecondary
+val TextMutedDark = DesignTokens.Palette.GrayMuted
 
-val PureWhite = Color(0xFFFFFFFF)
-val TextPrimaryDark = Color(0xFFF4F4F5)
-val TextSecondaryDark = Color(0xFFA1A1AA)
-val TextMutedDark = Color(0xFF71717A)
+val WarningAccent = DesignTokens.Palette.WarningAccent
+val WarningAccentMuted = DesignTokens.Palette.WarningAccentMuted
+val WarningAccentBorder = DesignTokens.Palette.WarningAccentBorder
 
-// Subtle functional accents
-val AccentOrange = Color(0xFFFF5B22) // Reference warm pill badge
-val AccentGreen = Color(0xFF22C55E)  // Active status
-val AccentRed = Color(0xFFEF4444)    // Blocked alert
+val AccentOrange = DesignTokens.Palette.WarningAccent
+val AccentRed = DesignTokens.Palette.StatusError
+val AccentGreen = DesignTokens.Palette.StatusSuccess
 
-// Dark Scheme
+// ── Dark Scheme (Strict Monochrome + Muted Warning) ───────────────────────────
 private val HourLockDarkColorScheme = darkColorScheme(
-    primary = PureWhite,
-    onPrimary = PureBlack,
-    primaryContainer = DarkSurfaceCard,
-    onPrimaryContainer = PureWhite,
+    primary = DesignTokens.Palette.PureWhite,
+    onPrimary = DesignTokens.Palette.PureBlack,
+    primaryContainer = DesignTokens.Palette.DarkCard,
+    onPrimaryContainer = DesignTokens.Palette.PureWhite,
 
-    secondary = TextSecondaryDark,
-    onSecondary = PureBlack,
-    secondaryContainer = DarkSurfaceElevated,
-    onSecondaryContainer = PureWhite,
+    secondary = DesignTokens.Palette.GraySecondary,
+    onSecondary = DesignTokens.Palette.PureBlack,
+    secondaryContainer = DesignTokens.Palette.DarkElevated,
+    onSecondaryContainer = DesignTokens.Palette.PureWhite,
 
-    tertiary = AccentOrange,
-    onTertiary = PureWhite,
+    tertiary = DesignTokens.Palette.WarningAccent,
+    onTertiary = DesignTokens.Palette.PureWhite,
 
-    background = DarkBackground,
-    onBackground = TextPrimaryDark,
+    background = DesignTokens.Palette.DarkBackground,
+    onBackground = DesignTokens.Palette.PureWhite,
 
-    surface = DarkSurface,
-    onSurface = TextPrimaryDark,
-    surfaceVariant = DarkSurfaceCard,
-    onSurfaceVariant = TextSecondaryDark,
+    surface = DesignTokens.Palette.DarkSurface,
+    onSurface = DesignTokens.Palette.PureWhite,
+    surfaceVariant = DesignTokens.Palette.DarkCard,
+    onSurfaceVariant = DesignTokens.Palette.GraySecondary,
 
-    error = AccentRed,
-    onError = PureWhite,
+    error = DesignTokens.Palette.StatusError,
+    onError = DesignTokens.Palette.PureWhite,
 
-    outline = DarkBorder,
-    outlineVariant = DarkBorderSubtle,
+    outline = DesignTokens.Palette.DarkBorder,
+    outlineVariant = DesignTokens.Palette.DarkBorderSubtle,
 )
 
-// Light Scheme
+// ── Light Scheme ──────────────────────────────────────────────────────────────
 private val HourLockLightColorScheme = lightColorScheme(
-    primary = PureBlack,
-    onPrimary = PureWhite,
-    primaryContainer = Color(0xFFE4E4E7),
-    onPrimaryContainer = PureBlack,
+    primary = DesignTokens.Palette.PureBlack,
+    onPrimary = DesignTokens.Palette.PureWhite,
+    primaryContainer = DesignTokens.Palette.LightCard,
+    onPrimaryContainer = DesignTokens.Palette.PureBlack,
 
-    secondary = Color(0xFF52525B),
-    onSecondary = PureWhite,
-    secondaryContainer = Color(0xFFF4F4F5),
-    onSecondaryContainer = PureBlack,
+    secondary = DesignTokens.Palette.GrayMuted,
+    onSecondary = DesignTokens.Palette.PureWhite,
+    secondaryContainer = DesignTokens.Palette.LightElevated,
+    onSecondaryContainer = DesignTokens.Palette.PureBlack,
 
-    tertiary = AccentOrange,
-    onTertiary = PureWhite,
+    tertiary = DesignTokens.Palette.WarningAccent,
+    onTertiary = DesignTokens.Palette.PureWhite,
 
-    background = Color(0xFFF4F5F7),
-    onBackground = Color(0xFF09090B),
+    background = DesignTokens.Palette.LightBackground,
+    onBackground = DesignTokens.Palette.PureBlack,
 
-    surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF09090B),
-    surfaceVariant = Color(0xFFFFFFFF),
-    onSurfaceVariant = Color(0xFF71717A),
+    surface = DesignTokens.Palette.LightSurface,
+    onSurface = DesignTokens.Palette.PureBlack,
+    surfaceVariant = DesignTokens.Palette.LightCard,
+    onSurfaceVariant = DesignTokens.Palette.GrayMuted,
 
-    error = AccentRed,
-    onError = PureWhite,
+    error = DesignTokens.Palette.StatusError,
+    onError = DesignTokens.Palette.PureWhite,
 
-    outline = Color(0xFFE4E4E7),
-    outlineVariant = Color(0xFFF4F4F5),
+    outline = DesignTokens.Palette.LightBorder,
+    outlineVariant = DesignTokens.Palette.LightBorderSubtle,
 )
 
 @Composable
 fun HourLockTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true, // Default to sleek dark mode
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) HourLockDarkColorScheme else HourLockLightColorScheme
@@ -104,7 +106,9 @@ fun HourLockTheme(
         SideEffect {
             val window = (view.context as Activity).window
             window.statusBarColor = colorScheme.background.toArgb()
+            window.navigationBarColor = colorScheme.background.toArgb()
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !darkTheme
         }
     }
 
