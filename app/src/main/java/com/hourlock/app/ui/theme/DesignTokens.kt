@@ -136,6 +136,15 @@ object DesignTokens {
             letterSpacing = 0.sp
         )
 
+        /** Body Small (13sp, Regular) */
+        fun bodySmall(fontFamily: FontFamily = FontFamily.Default) = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            letterSpacing = 0.sp
+        )
+
         /** Caption (12sp, Regular, uppercase, letter-spaced) — for section labels like "TODAY" / "THIS WEEK" */
         fun caption(fontFamily: FontFamily = FontFamily.Default) = TextStyle(
             fontFamily = fontFamily,

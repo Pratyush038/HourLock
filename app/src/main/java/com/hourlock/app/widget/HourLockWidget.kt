@@ -7,7 +7,8 @@ import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
-import androidx.glance.action.actionStartActivity
+import androidx.glance.appwidget.action.actionStartActivity
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.cornerRadius
@@ -64,80 +65,78 @@ class HourLockWidget : GlanceAppWidget() {
         val isBlocked = (maxUsed >= maxLimit) && isEnabled && !isPaused
 
         provideContent {
-            GlanceTheme {
-                Box(
-                    modifier = GlanceModifier
-                        .fillMaxSize()
-                        .background(Color(0xFF0A0A0A))
-                        .cornerRadius(20.dp)
-                        .padding(14.dp)
-                        .clickable(actionStartActivity<MainActivity>()),
-                    contentAlignment = Alignment.Center
+            Box(
+                modifier = GlanceModifier
+                    .fillMaxSize()
+                    .background(Color(0xFF0A0A0A))
+                    .cornerRadius(20.dp)
+                    .padding(14.dp)
+                    .clickable(actionStartActivity<MainActivity>()),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = GlanceModifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalAlignment = Alignment.Start
                 ) {
-                    Column(
-                        modifier = GlanceModifier.fillMaxSize(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalAlignment = Alignment.Start
+                    // Header Row with App Tag
+                    Row(
+                        modifier = GlanceModifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Header Row with App Tag
-                        Row(
-                            modifier = GlanceModifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "HOURLOCK",
-                                style = TextStyle(
-                                    color = ColorProvider(Color(0xFF8E8E93)),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
-                            Spacer(GlanceModifier.defaultWeight())
-                            Text(
-                                text = if (isBlocked) "LOCKED" else if (isPaused) "PAUSED" else "ACTIVE",
-                                style = TextStyle(
-                                    color = ColorProvider(if (isBlocked) Color(0xFFD97706) else Color(0xFFFFFFFF)),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
-                        }
-
-                        Spacer(GlanceModifier.height(6.dp))
-
-                        // Large Remaining Minutes Number
-                        Row(
-                            verticalAlignment = Alignment.Bottom
-                        ) {
-                            Text(
-                                text = if (isBlocked) "0" else "$remainingMins",
-                                style = TextStyle(
-                                    color = ColorProvider(if (isBlocked) Color(0xFFD97706) else Color(0xFFFFFFFF)),
-                                    fontSize = 28.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
-                            Spacer(GlanceModifier.width(4.dp))
-                            Text(
-                                text = "min left",
-                                style = TextStyle(
-                                    color = ColorProvider(Color(0xFFA1A1AA)),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            )
-                        }
-
-                        Spacer(GlanceModifier.height(2.dp))
-
                         Text(
-                            text = "Resets at top of hour",
+                            text = "HOURLOCK",
                             style = TextStyle(
-                                color = ColorProvider(Color(0xFF6B6B6B)),
-                                fontSize = 10.sp
+                                color = ColorProvider(Color(0xFF8E8E93)),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Spacer(GlanceModifier.defaultWeight())
+                        Text(
+                            text = if (isBlocked) "LOCKED" else if (isPaused) "PAUSED" else "ACTIVE",
+                            style = TextStyle(
+                                color = ColorProvider(if (isBlocked) Color(0xFFD97706) else Color(0xFFFFFFFF)),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         )
                     }
+
+                    Spacer(GlanceModifier.height(6.dp))
+
+                    // Large Remaining Minutes Number
+                    Row(
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text(
+                            text = if (isBlocked) "0" else "$remainingMins",
+                            style = TextStyle(
+                                color = ColorProvider(if (isBlocked) Color(0xFFD97706) else Color(0xFFFFFFFF)),
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Spacer(GlanceModifier.width(4.dp))
+                        Text(
+                            text = "min left",
+                            style = TextStyle(
+                                color = ColorProvider(Color(0xFFA1A1AA)),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                    }
+
+                    Spacer(GlanceModifier.height(2.dp))
+
+                    Text(
+                        text = "Resets at top of hour",
+                        style = TextStyle(
+                            color = ColorProvider(Color(0xFF6B6B6B)),
+                            fontSize = 10.sp
+                        )
+                    )
                 }
             }
         }
