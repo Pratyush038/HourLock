@@ -29,9 +29,6 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,7 +44,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,7 +65,6 @@ import com.hourlock.app.ui.components.MonochromeSlider
 import com.hourlock.app.ui.components.MonochromeSwitch
 import com.hourlock.app.ui.components.RingProgress
 import com.hourlock.app.ui.components.RoundedCard
-import com.hourlock.app.ui.components.StatChip
 import com.hourlock.app.ui.theme.DesignTokens
 import com.hourlock.app.ui.theme.WordmarkFont
 import kotlinx.coroutines.Dispatchers
@@ -120,10 +115,6 @@ fun HomeScreen(
     val usedSecondsMap = remember { mutableStateMapOf<String, Int>() }
     val limitMinutesMap = remember { mutableStateMapOf<String, Int>() }
     val todaySecondsMap = remember { mutableStateMapOf<String, Long>() }
-    var totalTodaySecondsAll by remember { mutableLongStateOf(0L) }
-    var streakDays by remember { mutableIntStateOf(1) }
-    var weekVsLastWeekDelta by remember { mutableIntStateOf(-18) }
-
     LaunchedEffect(monitoredPackages) {
         while (true) {
             for (pkg in monitoredPackages) {
@@ -131,12 +122,6 @@ fun HomeScreen(
                 limitMinutesMap[pkg] = repo.getLimitSeconds(pkg) / 60
                 todaySecondsMap[pkg] = repo.getTodayTotalSeconds(pkg, context)
             }
-            totalTodaySecondsAll = repo.getTodayTotalSecondsAll(monitoredPackages, context)
-            try {
-                val streakSummary = analyticsRepo.getStreakSummary(monitoredPackages)
-                streakDays = streakSummary.currentStreak
-                weekVsLastWeekDelta = analyticsRepo.getWeekVsLastWeekDelta(monitoredPackages)
-            } catch (_: Exception) {}
             delay(1000L)
         }
     }
@@ -249,143 +234,14 @@ fun HomeScreen(
                 }
             }
 
-            // ── 1. HERO CIRCULAR RING DISPLAY ──────────────────────────────────
-            item {
-                val maxLimitMinutes = monitoredPackages.maxOfOrNull { limitMinutesMap[it] ?: 10 } ?: 10
-                val maxLimitSeconds = maxLimitMinutes * 60
-                val maxUsedSeconds = monitoredPackages.maxOfOrNull { usedSecondsMap[it] ?: 0 } ?: 0
-                val remainingSeconds = (maxLimitSeconds - maxUsedSeconds).coerceAtLeast(0)
-                val remainingMinutes = remainingSeconds / 60
 
-                val overallProgress = if (maxLimitSeconds > 0) {
-                    (maxUsedSeconds.toFloat() / maxLimitSeconds.toFloat()).coerceIn(0f, 1f)
-                } else 0f
-
-                val isAnyBlocked = monitoredPackages.any { pkg ->
-                    val u = usedSecondsMap[pkg] ?: 0
-                    val l = (limitMinutesMap[pkg] ?: 10) * 60
-                    u >= l && blockingEnabled && !isPaused
-                }
-
-                RoundedCard(
-                    shape = DesignTokens.Shapes.MainCard,
-                    containerColor = DesignTokens.Palette.DarkCard,
-                    borderColor = if (isAnyBlocked) DesignTokens.Palette.WarningAccentBorder else DesignTokens.Palette.DarkBorder,
-                    contentPadding = 24.dp
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        RingProgress(
-                            progress = overallProgress,
-                            size = 210.dp,
-                            strokeWidth = 14.dp,
-                            trackColor = DesignTokens.Palette.DarkElevated,
-                            progressColor = DesignTokens.Palette.PureWhite,
-                            warningColor = DesignTokens.Palette.WarningAccent,
-                            isWarningOrBlocked = isAnyBlocked,
-                            content = {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    if (isAnyBlocked) {
-                                        Text(
-                                            text = "LIMIT",
-                                            style = DesignTokens.Typography.display().copy(
-                                                color = DesignTokens.Palette.WarningAccent,
-                                                fontSize = 28.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        )
-                                        Text(
-                                            text = "REACHED",
-                                            style = DesignTokens.Typography.caption().copy(
-                                                color = DesignTokens.Palette.WarningAccent,
-                                                fontSize = 11.sp,
-                                                letterSpacing = 1.5.sp
-                                            )
-                                        )
-                                        Text(
-                                            text = "RESETS NEXT HOUR",
-                                            style = DesignTokens.Typography.caption().copy(
-                                                color = DesignTokens.Palette.GrayMuted,
-                                                fontSize = 9.sp,
-                                                letterSpacing = 1.sp
-                                            ),
-                                            modifier = Modifier.padding(top = 2.dp)
-                                        )
-                                    } else {
-                                        Text(
-                                            text = "$remainingMinutes",
-                                            style = DesignTokens.Typography.display().copy(
-                                                fontSize = 44.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = DesignTokens.Palette.PureWhite,
-                                                letterSpacing = (-1).sp
-                                            )
-                                        )
-                                        Text(
-                                            text = "MINUTES LEFT",
-                                            style = DesignTokens.Typography.caption().copy(
-                                                color = DesignTokens.Palette.GrayMuted,
-                                                fontSize = 11.sp,
-                                                letterSpacing = 1.2.sp
-                                            )
-                                        )
-                                        Text(
-                                            text = "THIS CLOCK HOUR",
-                                            style = DesignTokens.Typography.caption().copy(
-                                                color = DesignTokens.Palette.GraySecondary,
-                                                fontSize = 9.sp,
-                                                letterSpacing = 1.sp
-                                            ),
-                                            modifier = Modifier.padding(top = 2.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-
-            // ── 2. ROW OF STAT CHIPS ───────────────────────────────────────────
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm)
-                ) {
-                    StatChip(
-                        label = "Today",
-                        value = formatDuration(totalTodaySecondsAll),
-                        icon = Icons.Filled.Timer,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    StatChip(
-                        label = "Streak",
-                        value = "$streakDays ${if (streakDays == 1) "day" else "days"}",
-                        icon = Icons.Filled.Shield,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    StatChip(
-                        label = "Vs Last Week",
-                        value = "$weekVsLastWeekDelta%",
-                        icon = Icons.Filled.TrendingDown,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
 
             // ── 3. FULL-WIDTH MASTER ON/OFF TOGGLE CARD ────────────────────────
             item {
                 val isOn = blockingEnabled
-                val cardBg = if (isOn) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkCard
+                val cardBg = DesignTokens.Palette.DarkCard
                 val cardBorder = if (isOn) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorder
-                val textPrimary = if (isOn) DesignTokens.Palette.PureBlack else DesignTokens.Palette.PureWhite
+                val textPrimary = DesignTokens.Palette.PureWhite
                 val textSecondary = if (isOn) DesignTokens.Palette.GrayMuted else DesignTokens.Palette.GraySecondary
 
                 RoundedCard(
@@ -466,7 +322,7 @@ fun HomeScreen(
                                             if (isPaused) repo.clearPause() else repo.pauseForOneHour()
                                         }
                                     },
-                                color = if (isOn) DesignTokens.Palette.LightElevated else DesignTokens.Palette.DarkElevated,
+                                color = DesignTokens.Palette.DarkElevated,
                                 border = BorderStroke(1.dp, if (isPaused) DesignTokens.Palette.WarningAccentBorder else DesignTokens.Palette.DarkBorderSubtle)
                             ) {
                                 Row(
@@ -475,29 +331,33 @@ fun HomeScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Row(
+                                        modifier = Modifier.weight(1f),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Icon(
                                             if (isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                                             contentDescription = null,
-                                            tint = if (isPaused) DesignTokens.Palette.WarningAccent else if (isOn) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
+                                            tint = if (isPaused) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.PureWhite,
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Text(
                                             text = if (isPaused) "Pause active (resumes at top of hour)" else "Need emergency access? Take 1-hr pause",
                                             style = DesignTokens.Typography.bodySmall().copy(
-                                                color = if (isPaused) DesignTokens.Palette.WarningAccent else if (isOn) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
+                                                color = if (isPaused) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.PureWhite,
                                                 fontWeight = FontWeight.Medium,
                                                 fontSize = 12.sp
-                                            )
+                                            ),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
 
                                     Text(
                                         text = if (isPaused) "RESUME" else "PAUSE",
+                                        modifier = Modifier.wrapContentWidth().padding(start = 12.dp),
                                         style = DesignTokens.Typography.caption().copy(
-                                            color = if (isPaused) DesignTokens.Palette.WarningAccent else if (isOn) DesignTokens.Palette.PureBlack else DesignTokens.Palette.PureWhite,
+                                            color = if (isPaused) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.PureWhite,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 10.sp
                                         )
