@@ -1,7 +1,6 @@
 package com.hourlock.app.widget
 
 import android.content.Context
-import android.content.Intent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -14,21 +13,11 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
-import androidx.glance.layout.Alignment
-import androidx.glance.layout.Box
-import androidx.glance.layout.Column
-import androidx.glance.layout.Row
-import androidx.glance.layout.Spacer
-import androidx.glance.layout.fillMaxSize
-import androidx.glance.layout.fillMaxWidth
-import androidx.glance.layout.height
-import androidx.glance.layout.padding
-import androidx.glance.layout.size
-import androidx.glance.layout.width
+import androidx.glance.color.ColorProvider
+import androidx.glance.layout.*
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.glance.unit.ColorProvider
 import com.hourlock.app.DEFAULT_LIMIT_MINUTES
 import com.hourlock.app.MainActivity
 import com.hourlock.app.PrefsRepository
@@ -57,19 +46,15 @@ class HourLockWidget : GlanceAppWidget() {
         val remainingMins = (maxLimit - maxUsed).coerceAtLeast(0)
         val isBlocked = (maxUsed >= maxLimit) && isEnabled && !isPaused
 
-        val launchIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-
         provideContent {
             GlanceTheme {
                 Box(
                     modifier = GlanceModifier
                         .fillMaxSize()
-                        .background(ColorProvider(Color(0xFF0A0A0A)))
+                        .background(Color(0xFF0A0A0A))
                         .cornerRadius(20.dp)
                         .padding(14.dp)
-                        .clickable(actionStartActivity(launchIntent)),
+                        .clickable(actionStartActivity<MainActivity>()),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(

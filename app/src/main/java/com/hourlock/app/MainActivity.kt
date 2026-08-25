@@ -44,7 +44,7 @@ fun HourLockNavHost() {
         startDestination = "home",
         enterTransition = {
             fadeIn(animationSpec = tween(300)) + slideIntoContainer(
-                AnimatedContentTransitionScope.SlideDirection.Start,
+                towards = AnimatedContentTransitionScope.SlideDirection.Start,
                 animationSpec = tween(300)
             )
         },
@@ -56,7 +56,7 @@ fun HourLockNavHost() {
         },
         popExitTransition = {
             fadeOut(animationSpec = tween(300)) + slideOutOfContainer(
-                AnimatedContentTransitionScope.SlideDirection.End,
+                towards = AnimatedContentTransitionScope.SlideDirection.End,
                 animationSpec = tween(300)
             )
         }

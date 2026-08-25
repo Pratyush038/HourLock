@@ -5,7 +5,6 @@ import android.content.Intent
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,12 +20,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Pause
@@ -40,8 +36,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -255,7 +249,6 @@ fun HomeScreen(
 
             // ── 1. HERO CIRCULAR RING DISPLAY ──────────────────────────────────
             item {
-                // Compute aggregated or worst-case app usage for current hour
                 val maxLimitMinutes = monitoredPackages.maxOfOrNull { limitMinutesMap[it] ?: 10 } ?: 10
                 val maxLimitSeconds = maxLimitMinutes * 60
                 val maxUsedSeconds = monitoredPackages.maxOfOrNull { usedSecondsMap[it] ?: 0 } ?: 0
@@ -1114,7 +1107,7 @@ private fun getAppLabel(context: Context, pkg: String): String {
         val pm = context.packageManager
         val info = pm.getApplicationInfo(pkg, 0)
         pm.getApplicationLabel(info).toString()
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
     }
 }
@@ -1127,7 +1120,7 @@ fun isAccessibilityServiceEnabled(context: Context): Boolean {
         ) ?: return false
         val componentName = "${context.packageName}/${UsageTrackerService::class.java.canonicalName}"
         enabledServices.split(":").any { it.equals(componentName, ignoreCase = true) }
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         false
     }
 }
@@ -1143,7 +1136,7 @@ fun isUsageAccessGranted(context: Context): Boolean {
             now
         )
         !stats.isNullOrEmpty()
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         false
     }
 }
