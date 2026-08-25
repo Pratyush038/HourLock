@@ -13,11 +13,20 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
-import androidx.glance.color.ColorProvider
-import androidx.glance.layout.*
+import androidx.glance.layout.Alignment
+import androidx.glance.layout.Box
+import androidx.glance.layout.Column
+import androidx.glance.layout.Row
+import androidx.glance.layout.Spacer
+import androidx.glance.layout.fillMaxSize
+import androidx.glance.layout.fillMaxWidth
+import androidx.glance.layout.height
+import androidx.glance.layout.padding
+import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import androidx.glance.unit.ColorProvider
 import com.hourlock.app.DEFAULT_LIMIT_MINUTES
 import com.hourlock.app.MainActivity
 import com.hourlock.app.PrefsRepository
@@ -41,8 +50,16 @@ class HourLockWidget : GlanceAppWidget() {
         val pauseUntil = repo.pauseUntilFlow.first()
         val isPaused = System.currentTimeMillis() < pauseUntil
 
-        val maxLimit = monitored.maxOfOrNull { (repo.limitMinutesFlow(it).first()) } ?: DEFAULT_LIMIT_MINUTES
-        val maxUsed = monitored.maxOfOrNull { repo.getUsedSeconds(it) / 60 } ?: 0
+        var maxLimit = DEFAULT_LIMIT_MINUTES
+        var maxUsed = 0
+
+        for (pkg in monitored) {
+            val limit = repo.getLimitSeconds(pkg) / 60
+            val used = repo.getUsedSeconds(pkg) / 60
+            if (limit > maxLimit) maxLimit = limit
+            if (used > maxUsed) maxUsed = used
+        }
+
         val remainingMins = (maxLimit - maxUsed).coerceAtLeast(0)
         val isBlocked = (maxUsed >= maxLimit) && isEnabled && !isPaused
 
