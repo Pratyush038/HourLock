@@ -71,6 +71,9 @@ import com.hourlock.app.ui.components.RoundedCard
 import com.hourlock.app.ui.theme.DesignTokens
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * SettingsScreen
@@ -93,13 +96,16 @@ fun SettingsScreen(onBack: () -> Unit) {
     val monitoredPackages by repo.monitoredPackagesFlow.collectAsState(initial = setOf("com.instagram.android"))
     val blockingEnabled by repo.blockingEnabledFlow.collectAsState(initial = true)
     val pauseUntil by repo.pauseUntilFlow.collectAsState(initial = 0L)
+    val commitmentLockUntil by repo.commitmentLockUntilFlow.collectAsState(initial = 0L)
     val isPaused = System.currentTimeMillis() < pauseUntil
+    val isCommitmentLockActive = commitmentLockUntil > System.currentTimeMillis()
 
     var a11yGranted by remember { mutableStateOf(false) }
     var usageGranted by remember { mutableStateOf(false) }
     var batteryOptExempt by remember { mutableStateOf(false) }
 
     var showResetDialog by remember { mutableStateOf(false) }
+    var showCommitmentDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -221,9 +227,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ── 2. MONITORED APPS BUDGETS ──────────────────────────────────────
+            // ── 2. MONITORED APP SCHEDULES ─────────────────────────────────────
             item {
-                SectionHeader("MONITORED APPS BUDGETS")
+                SectionHeader("MONITORED APP SCHEDULES")
             }
 
             if (monitoredPackages.isEmpty()) {
@@ -239,6 +245,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                     MonitoredAppBudgetRowCard(
                         pkg = pkg,
                         repo = repo,
+                        allMonitoredPackages = monitoredPackages,
+                        isCommitmentLockActive = isCommitmentLockActive,
+                        commitmentLockUntilMillis = commitmentLockUntil,
                         onRemove = {
                             scope.launch {
                                 repo.setMonitoredPackages(monitoredPackages - pkg)
@@ -288,7 +297,79 @@ fun SettingsScreen(onBack: () -> Unit) {
 
                         MonochromeSwitch(
                             checked = blockingEnabled,
-                            onCheckedChange = { scope.launch { repo.setBlockingEnabled(it) } }
+                            onCheckedChange = {
+                                if (isCommitmentLockActive && !it) {
+                                    return@MonochromeSwitch
+                                }
+                                scope.launch { repo.setBlockingEnabled(it) }
+                            },
+                            enabled = !(isCommitmentLockActive && blockingEnabled)
+                        )
+                    }
+
+                    if (isCommitmentLockActive && blockingEnabled) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Commitment Lock active until ${formatLockUntil(commitmentLockUntil)}",
+                            style = DesignTokens.Typography.bodySmall().copy(
+                                color = DesignTokens.Palette.WarningAccent,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            item {
+                SectionHeader("COMMITMENT LOCK")
+            }
+
+            item {
+                RoundedCard(
+                    shape = DesignTokens.Shapes.Card,
+                    containerColor = DesignTokens.Palette.DarkCard,
+                    borderColor = DesignTokens.Palette.DarkBorder,
+                    contentPadding = 18.dp
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Commitment Lock",
+                                style = DesignTokens.Typography.subtitle().copy(
+                                    color = DesignTokens.Palette.PureWhite,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = if (isCommitmentLockActive) {
+                                    "Locked until ${formatLockUntil(commitmentLockUntil)}"
+                                } else {
+                                    "Prevent loosening restrictions for 24h, 72h, or 7 days"
+                                },
+                                style = DesignTokens.Typography.bodySmall().copy(
+                                    color = DesignTokens.Palette.GraySecondary,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
+
+                        MonochromeSwitch(
+                            checked = isCommitmentLockActive,
+                            onCheckedChange = { checked ->
+                                if (!checked && isCommitmentLockActive) {
+                                    return@MonochromeSwitch
+                                }
+                                if (checked && !isCommitmentLockActive) {
+                                    showCommitmentDialog = true
+                                }
+                            },
+                            enabled = !isCommitmentLockActive
                         )
                     }
                 }
@@ -476,9 +557,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 TextButton(
                     onClick = {
                         scope.launch {
-                            for (pkg in monitoredPackages) {
-                                repo.setLimitMinutes(pkg, repo.getLimitSeconds(pkg) / 60)
-                            }
+                            repo.resetCurrentQuotaCounters(monitoredPackages)
                             showResetDialog = false
                         }
                     }
@@ -488,6 +567,65 @@ fun SettingsScreen(onBack: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel", color = DesignTokens.Palette.GrayMuted)
+                }
+            }
+        )
+    }
+
+    if (showCommitmentDialog) {
+        var selectedDuration by remember { mutableStateOf(24L) }
+        var confirmationText by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showCommitmentDialog = false },
+            containerColor = DesignTokens.Palette.DarkCard,
+            shape = DesignTokens.Shapes.Card,
+            title = {
+                Text(
+                    "Enable Commitment Lock",
+                    style = DesignTokens.Typography.title().copy(
+                        color = DesignTokens.Palette.PureWhite,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Choose duration and type I commit to confirm. You will not be able to loosen restrictions until it expires.",
+                        style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.GraySecondary)
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        IntervalChip("24h", selectedDuration == 24L) { selectedDuration = 24L }
+                        IntervalChip("72h", selectedDuration == 72L) { selectedDuration = 72L }
+                        IntervalChip("7 days", selectedDuration == 168L) { selectedDuration = 168L }
+                    }
+
+                    androidx.compose.material3.OutlinedTextField(
+                        value = confirmationText,
+                        onValueChange = { confirmationText = it },
+                        label = { Text("Type: I commit") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            repo.startCommitmentLock(selectedDuration * 60L * 60L * 1000L)
+                            showCommitmentDialog = false
+                        }
+                    },
+                    enabled = confirmationText.trim() == "I commit"
+                ) {
+                    Text("Lock In", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCommitmentDialog = false }) {
                     Text("Cancel", color = DesignTokens.Palette.GrayMuted)
                 }
             }
@@ -588,15 +726,23 @@ private fun PermissionRowItem(
 private fun MonitoredAppBudgetRowCard(
     pkg: String,
     repo: PrefsRepository,
+    allMonitoredPackages: Set<String>,
+    isCommitmentLockActive: Boolean,
+    commitmentLockUntilMillis: Long,
     onRemove: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val limitMinFlow = remember(pkg) { repo.limitMinutesFlow(pkg) }
-    val limitMin by limitMinFlow.collectAsState(initial = DEFAULT_LIMIT_MINUTES)
+    val scheduleFlow = remember(pkg) { repo.scheduleFlow(pkg) }
+    val schedule by scheduleFlow.collectAsState(initial = defaultSimpleSchedule())
     val appLabel = remember(pkg) { getAppLabel(context, pkg) }
+    val checkInEnabledFlow = remember(pkg) { repo.sessionCheckInEnabledFlow(pkg) }
+    val checkInEnabled by checkInEnabledFlow.collectAsState(initial = true)
+    val checkInIntervalFlow = remember(pkg) { repo.sessionCheckInIntervalMinutesFlow(pkg) }
+    val checkInIntervalMinutes by checkInIntervalFlow.collectAsState(initial = DEFAULT_SESSION_CHECK_IN_INTERVAL_MINUTES)
 
-    var sliderValue by remember(limitMin) { mutableFloatStateOf(limitMin.toFloat()) }
+    var showScheduleEditor by remember { mutableStateOf(false) }
+    var showCopyDialog by remember { mutableStateOf(false) }
 
     RoundedCard(
         shape = DesignTokens.Shapes.Card,
@@ -639,7 +785,7 @@ private fun MonitoredAppBudgetRowCard(
                         )
                     )
                     Text(
-                        text = "${sliderValue.toInt()} min / hour budget",
+                        text = "${schedule.size} block schedule",
                         style = DesignTokens.Typography.bodySmall().copy(
                             color = DesignTokens.Palette.GraySecondary,
                             fontSize = 12.sp
@@ -648,25 +794,514 @@ private fun MonitoredAppBudgetRowCard(
                 }
             }
 
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Filled.Close, contentDescription = "Remove", tint = DesignTokens.Palette.GrayMuted, modifier = Modifier.size(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                IconButton(onClick = { showCopyDialog = true }) {
+                    Icon(Icons.Filled.Security, contentDescription = "Copy schedule", tint = DesignTokens.Palette.GrayMuted, modifier = Modifier.size(18.dp))
+                }
+                IconButton(
+                    onClick = {
+                        if (!isCommitmentLockActive) onRemove()
+                    },
+                    enabled = !isCommitmentLockActive
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Remove",
+                        tint = if (isCommitmentLockActive) DesignTokens.Palette.DarkBorderSubtle else DesignTokens.Palette.GrayMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
 
-        MonochromeSlider(
-            value = sliderValue,
-            onValueChange = { sliderValue = it },
-            onValueChangeFinished = {
-                scope.launch {
-                    repo.setLimitMinutes(pkg, sliderValue.toInt())
+        schedule.forEach { block ->
+            Text(
+                text = formatBlockLabel(block),
+                style = DesignTokens.Typography.bodySmall().copy(
+                    color = DesignTokens.Palette.GraySecondary,
+                    fontSize = 12.sp
+                )
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(DesignTokens.Shapes.Button)
+                .clickable { showScheduleEditor = true },
+            shape = DesignTokens.Shapes.Button,
+            color = DesignTokens.Palette.DarkElevated,
+            border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
+        ) {
+            Text(
+                text = "Edit Schedule",
+                modifier = Modifier.padding(vertical = 10.dp),
+                style = DesignTokens.Typography.caption().copy(
+                    color = DesignTokens.Palette.PureWhite,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                ),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        HorizontalDivider(color = DesignTokens.Palette.DarkBorderSubtle, thickness = 0.5.dp)
+        Spacer(Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Session check-ins",
+                    style = DesignTokens.Typography.bodyMedium().copy(
+                        color = DesignTokens.Palette.PureWhite,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+                Text(
+                    text = "Gentle reminders during active sessions",
+                    style = DesignTokens.Typography.bodySmall().copy(
+                        color = DesignTokens.Palette.GrayMuted,
+                        fontSize = 11.sp
+                    )
+                )
+            }
+
+            MonochromeSwitch(
+                checked = checkInEnabled,
+                onCheckedChange = { enabled ->
+                    scope.launch {
+                        repo.setSessionCheckInEnabled(pkg, enabled)
+                    }
                 }
-            },
-            valueRange = 1f..60f,
-            steps = 58
+            )
+        }
+
+        if (checkInEnabled) {
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(3, 5, 10).forEach { optionMinutes ->
+                    IntervalChip(
+                        label = "$optionMinutes min",
+                        selected = checkInIntervalMinutes == optionMinutes,
+                        onClick = {
+                            scope.launch {
+                                repo.setSessionCheckInIntervalMinutes(pkg, optionMinutes)
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        if (isCommitmentLockActive) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Loosening actions are locked until ${formatLockUntil(commitmentLockUntilMillis)}",
+                style = DesignTokens.Typography.bodySmall().copy(
+                    color = DesignTokens.Palette.WarningAccent,
+                    fontSize = 11.sp
+                )
+            )
+        }
+    }
+
+    if (showScheduleEditor) {
+        ScheduleEditorDialog(
+            appLabel = appLabel,
+            initialSchedule = schedule,
+            isCommitmentLockActive = isCommitmentLockActive,
+            commitmentLockUntilMillis = commitmentLockUntilMillis,
+            onDismiss = { showScheduleEditor = false },
+            validateSchedule = { blocks -> repo.validateSchedule(blocks) },
+            onSave = { blocks ->
+                scope.launch {
+                    val result = repo.setScheduleForPackage(pkg, blocks)
+                    if (result.isValid) {
+                        showScheduleEditor = false
+                    }
+                }
+            }
         )
     }
+
+    if (showCopyDialog) {
+        CopyScheduleDialog(
+            sourceAppLabel = appLabel,
+            candidatePackages = allMonitoredPackages - pkg,
+            onDismiss = { showCopyDialog = false },
+            onCopy = { targets ->
+                scope.launch {
+                    repo.copySchedule(pkg, targets)
+                    showCopyDialog = false
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun IntervalChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = DesignTokens.Shapes.Chip,
+        color = if (selected) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkElevated,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorder
+        ),
+        modifier = Modifier.clip(DesignTokens.Shapes.Chip).clickable { onClick() }
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            style = DesignTokens.Typography.caption().copy(
+                color = if (selected) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 10.sp
+            )
+        )
+    }
+}
+
+@Composable
+private fun ScheduleEditorDialog(
+    appLabel: String,
+    initialSchedule: List<ScheduleBlock>,
+    isCommitmentLockActive: Boolean,
+    commitmentLockUntilMillis: Long,
+    validateSchedule: (List<ScheduleBlock>) -> ScheduleValidationResult,
+    onSave: (List<ScheduleBlock>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var blocks by remember(initialSchedule) { mutableStateOf(initialSchedule.sortedBy { it.startMinuteOfDay }) }
+    var editingIndex by remember { mutableStateOf<Int?>(null) }
+
+    val validation = validateSchedule(blocks)
+    val isTightening = isScheduleTighteningOrEqual(initialSchedule, blocks)
+    val canSave = validation.isValid && (!isCommitmentLockActive || isTightening)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DesignTokens.Palette.DarkCard,
+        shape = DesignTokens.Shapes.Card,
+        title = {
+            Text(
+                text = "$appLabel Schedule",
+                style = DesignTokens.Typography.title().copy(
+                    color = DesignTokens.Palette.PureWhite,
+                    fontWeight = FontWeight.Bold
+                )
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IntervalChip(label = "Simple", selected = false) {
+                        blocks = defaultSimpleSchedule()
+                    }
+                    IntervalChip(label = "Work Focus", selected = false) {
+                        blocks = workFocusPreset()
+                    }
+                    IntervalChip(label = "Weekend", selected = false) {
+                        blocks = weekendPreset()
+                    }
+                }
+
+                blocks.forEachIndexed { index, block ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(DesignTokens.Shapes.Button)
+                            .clickable { editingIndex = index }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = formatBlockLabel(block),
+                            style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.PureWhite)
+                        )
+
+                        IconButton(
+                            onClick = {
+                                blocks = blocks.filterIndexed { i, _ -> i != index }
+                            },
+                            enabled = !isCommitmentLockActive
+                        ) {
+                            Icon(
+                                Icons.Filled.DeleteOutline,
+                                contentDescription = "Delete block",
+                                tint = if (isCommitmentLockActive) DesignTokens.Palette.DarkBorderSubtle else DesignTokens.Palette.GrayMuted
+                            )
+                        }
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(DesignTokens.Shapes.Button)
+                        .clickable {
+                            val targetIndex = blocks.indices.maxByOrNull { i ->
+                                blocks[i].endMinuteOfDay - blocks[i].startMinuteOfDay
+                            }
+                            if (targetIndex != null) {
+                                val target = blocks[targetIndex]
+                                val length = target.endMinuteOfDay - target.startMinuteOfDay
+                                if (length >= 2) {
+                                    val midpoint = target.startMinuteOfDay + (length / 2)
+                                    val first = target.copy(endMinuteOfDay = midpoint)
+                                    val second = target.copy(startMinuteOfDay = midpoint)
+                                    blocks = buildList {
+                                        addAll(blocks.take(targetIndex))
+                                        add(first)
+                                        add(second)
+                                        addAll(blocks.drop(targetIndex + 1))
+                                    }
+                                }
+                            }
+                        },
+                    shape = DesignTokens.Shapes.Button,
+                    color = DesignTokens.Palette.DarkElevated,
+                    border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
+                ) {
+                    Text(
+                        text = "+ Add Block",
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        style = DesignTokens.Typography.caption().copy(
+                            color = DesignTokens.Palette.PureWhite,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+
+                if (!validation.isValid) {
+                    Text(
+                        text = validation.errorMessage ?: "Invalid schedule",
+                        style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.WarningAccent)
+                    )
+                } else if (isCommitmentLockActive && !isTightening) {
+                    Text(
+                        text = "Commitment Lock active until ${formatLockUntil(commitmentLockUntilMillis)}. Only stricter schedule changes are allowed.",
+                        style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.WarningAccent)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(blocks) }, enabled = canSave) {
+                Text("Save", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = DesignTokens.Palette.GrayMuted)
+            }
+        }
+    )
+
+    editingIndex?.let { index ->
+        val block = blocks.getOrNull(index)
+        if (block != null) {
+            EditBlockDialog(
+                block = block,
+                onDismiss = { editingIndex = null },
+                onSave = { updated ->
+                    blocks = blocks.mapIndexed { i, existing ->
+                        if (i == index) updated else existing
+                    }
+                    editingIndex = null
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun EditBlockDialog(
+    block: ScheduleBlock,
+    onSave: (ScheduleBlock) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var startText by remember(block) { mutableStateOf(toTimeInput(block.startMinuteOfDay)) }
+    var endText by remember(block) { mutableStateOf(toTimeInput(block.endMinuteOfDay)) }
+    var limitText by remember(block) { mutableStateOf(block.limitMinutes.toString()) }
+    var ruleType by remember(block) { mutableStateOf(block.ruleType) }
+
+    val parsedStart = parseTimeInput(startText)
+    val parsedEnd = parseTimeInput(endText)
+    val parsedLimit = limitText.toIntOrNull()
+    val isValid = parsedStart != null && parsedEnd != null && parsedStart < parsedEnd && parsedLimit != null && parsedLimit >= 0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DesignTokens.Palette.DarkCard,
+        shape = DesignTokens.Shapes.Card,
+        title = {
+            Text(
+                "Edit Block",
+                style = DesignTokens.Typography.subtitle().copy(color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = startText,
+                    onValueChange = { startText = it },
+                    label = { Text("Start (HH:MM)") },
+                    singleLine = true
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = endText,
+                    onValueChange = { endText = it },
+                    label = { Text("End (HH:MM)") },
+                    singleLine = true
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IntervalChip(label = "Hourly", selected = ruleType == ScheduleRuleType.HOURLY_QUOTA) {
+                        ruleType = ScheduleRuleType.HOURLY_QUOTA
+                    }
+                    IntervalChip(label = "Flat", selected = ruleType == ScheduleRuleType.FLAT_ALLOWANCE) {
+                        ruleType = ScheduleRuleType.FLAT_ALLOWANCE
+                    }
+                }
+                androidx.compose.material3.OutlinedTextField(
+                    value = limitText,
+                    onValueChange = { limitText = it.filter { ch -> ch.isDigit() } },
+                    label = { Text("Limit (minutes)") },
+                    singleLine = true
+                )
+                if (!isValid) {
+                    Text(
+                        "Use valid times and non-negative minutes.",
+                        style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.WarningAccent)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(
+                        ScheduleBlock(
+                            startMinuteOfDay = parsedStart!!,
+                            endMinuteOfDay = parsedEnd!!,
+                            ruleType = ruleType,
+                            limitMinutes = parsedLimit!!
+                        )
+                    )
+                },
+                enabled = isValid
+            ) {
+                Text("Apply", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = DesignTokens.Palette.GrayMuted)
+            }
+        }
+    )
+}
+
+@Composable
+private fun CopyScheduleDialog(
+    sourceAppLabel: String,
+    candidatePackages: Set<String>,
+    onCopy: (Set<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var selected by remember(candidatePackages) { mutableStateOf(setOf<String>()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DesignTokens.Palette.DarkCard,
+        shape = DesignTokens.Shapes.Card,
+        title = {
+            Text(
+                "Copy schedule from $sourceAppLabel",
+                style = DesignTokens.Typography.subtitle().copy(color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (candidatePackages.isEmpty()) {
+                    Text(
+                        "No other monitored apps available.",
+                        style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.GrayMuted)
+                    )
+                }
+                candidatePackages.forEach { targetPkg ->
+                    val label = getAppLabel(context, targetPkg)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(DesignTokens.Shapes.Button)
+                            .clickable {
+                                selected = if (targetPkg in selected) selected - targetPkg else selected + targetPkg
+                            }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = label,
+                            style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.PureWhite)
+                        )
+                        MonochromeSwitch(
+                            checked = targetPkg in selected,
+                            onCheckedChange = {
+                                selected = if (it) selected + targetPkg else selected - targetPkg
+                            }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onCopy(selected) }, enabled = selected.isNotEmpty()) {
+                Text("Copy", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = DesignTokens.Palette.GrayMuted)
+            }
+        }
+    )
+}
+
+private fun parseTimeInput(value: String): Int? {
+    val parts = value.trim().split(":")
+    if (parts.size != 2) return null
+    val hour = parts[0].toIntOrNull() ?: return null
+    val minute = parts[1].toIntOrNull() ?: return null
+    if (hour !in 0..24) return null
+    if (minute !in 0..59) return null
+    if (hour == 24 && minute != 0) return null
+    return (hour * 60 + minute).coerceIn(0, 24 * 60)
+}
+
+private fun toTimeInput(minuteOfDay: Int): String {
+    val m = minuteOfDay.coerceIn(0, 24 * 60)
+    val hour = m / 60
+    val minute = m % 60
+    return String.format(Locale.US, "%02d:%02d", hour, minute)
 }
 
 // ─── SECTION HEADER ────────────────────────────────────────────────────────────
@@ -682,6 +1317,45 @@ private fun SectionHeader(title: String) {
         ),
         modifier = Modifier.padding(start = 4.dp, top = 4.dp)
     )
+}
+
+private fun formatLockUntil(untilMillis: Long): String {
+    if (untilMillis <= 0L) return "-"
+    val sdf = SimpleDateFormat("EEE h:mm a", Locale.getDefault())
+    return sdf.format(Date(untilMillis))
+}
+
+private fun isScheduleTighteningOrEqual(
+    original: List<ScheduleBlock>,
+    candidate: List<ScheduleBlock>
+): Boolean {
+    val originalByMinute = scheduleStrictnessByMinute(original)
+    val candidateByMinute = scheduleStrictnessByMinute(candidate)
+    if (originalByMinute.size != 24 * 60 || candidateByMinute.size != 24 * 60) return false
+
+    for (minute in 0 until 24 * 60) {
+        if (candidateByMinute[minute] > originalByMinute[minute]) {
+            return false
+        }
+    }
+    return true
+}
+
+private fun scheduleStrictnessByMinute(blocks: List<ScheduleBlock>): FloatArray {
+    val result = FloatArray(24 * 60) { Float.POSITIVE_INFINITY }
+    for (block in blocks) {
+        val durationMinutes = (block.endMinuteOfDay - block.startMinuteOfDay).coerceAtLeast(1)
+        val score = when (block.ruleType) {
+            ScheduleRuleType.HOURLY_QUOTA -> block.limitMinutes.toFloat()
+            ScheduleRuleType.FLAT_ALLOWANCE -> (block.limitMinutes * 60f) / durationMinutes.toFloat()
+        }
+        val start = block.startMinuteOfDay.coerceIn(0, 24 * 60)
+        val end = block.endMinuteOfDay.coerceIn(0, 24 * 60)
+        for (m in start until end) {
+            result[m] = score
+        }
+    }
+    return result
 }
 
 private fun getAppLabel(context: Context, pkg: String): String {

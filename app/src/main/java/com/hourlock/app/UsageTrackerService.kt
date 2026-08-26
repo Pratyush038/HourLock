@@ -63,7 +63,9 @@ class UsageTrackerService : AccessibilityService() {
 
     private lateinit var repo: PrefsRepository
     private lateinit var analyticsRepo: com.hourlock.app.data.UsageLogRepository
+    private lateinit var sessionCheckInNotifier: SessionCheckInNotifier
     private var lastTrackedHour: Int = -1
+    private var sessionElapsedSeconds: Int = 0
 
     // ── Service lifecycle ──────────────────────────────────────────────────
 
@@ -72,6 +74,7 @@ class UsageTrackerService : AccessibilityService() {
             super.onServiceConnected()
             repo = PrefsRepository(applicationContext)
             analyticsRepo = com.hourlock.app.data.UsageLogRepository(applicationContext)
+            sessionCheckInNotifier = SessionCheckInNotifier(applicationContext)
 
             // Set service info dynamically as a safety belt alongside the XML
             // config — ensures we only receive the events we declared.
@@ -195,6 +198,7 @@ class UsageTrackerService : AccessibilityService() {
     private fun startTimerFor(pkg: String) {
         timerJob = serviceScope.launch {
             Log.d(TAG, "Timer started for $pkg")
+            sessionElapsedSeconds = 0
             // Immediate check: if already at limit, block immediately without waiting 1s
             try {
                 checkInitialLimit(pkg)
@@ -246,6 +250,7 @@ class UsageTrackerService : AccessibilityService() {
 
         // Increment and persist (also handles hour rollover inside repo)
         val used = repo.incrementUsedSeconds(pkg)
+        sessionElapsedSeconds += 1
 
         // Additive analytics: snapshot when hour changes
         val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
@@ -259,11 +264,13 @@ class UsageTrackerService : AccessibilityService() {
         }
         lastTrackedHour = currentHour
 
+        val limitSec = repo.getLimitSeconds(pkg)
+        maybeSendSessionCheckIn(pkg = pkg, usedSeconds = used, limitSeconds = limitSec)
+
         // Skip blocking checks if master toggle off or paused
         if (!cachedBlockingEnabled) return
         if (System.currentTimeMillis() < cachedPauseUntil) return
 
-        val limitSec = repo.getLimitSeconds(pkg)
         if (used >= limitSec) {
             Log.i(TAG, "$pkg reached limit ($used/$limitSec s) — launching BlockedActivity")
             serviceScope.launch {
@@ -282,12 +289,43 @@ class UsageTrackerService : AccessibilityService() {
      * Safe to call even if no timer is running.
      */
     private fun stopTimerIfRunning(reason: String = "") {
+        val packageToClear = currentForegroundPkg
         if (timerJob?.isActive == true) {
             Log.d(TAG, "Stopping timer. Reason: $reason")
             timerJob?.cancel()
         }
         timerJob = null
         currentForegroundPkg = null
+        sessionElapsedSeconds = 0
+        if (!packageToClear.isNullOrBlank()) {
+            try {
+                sessionCheckInNotifier.cancelForPackage(packageToClear)
+            } catch (_: Exception) {
+                // Notification cleanup must never affect tracking lifecycle.
+            }
+        }
+    }
+
+    private suspend fun maybeSendSessionCheckIn(pkg: String, usedSeconds: Int, limitSeconds: Int) {
+        if (usedSeconds >= limitSeconds) return
+        if (!repo.isSessionCheckInEnabled(pkg)) return
+
+        val intervalMinutes = repo.getSessionCheckInIntervalMinutes(pkg)
+        val intervalSeconds = intervalMinutes * 60
+        if (intervalSeconds <= 0 || sessionElapsedSeconds <= 0) return
+        if (sessionElapsedSeconds % intervalSeconds != 0) return
+
+        val elapsedMinutes = sessionElapsedSeconds / 60
+        val appLabel = getAppLabel(applicationContext, pkg)
+        try {
+            sessionCheckInNotifier.notifySessionCheckIn(
+                packageName = pkg,
+                appLabel = appLabel,
+                elapsedSessionMinutes = elapsedMinutes
+            )
+        } catch (_: Exception) {
+            // Informational notification errors must never affect enforcement.
+        }
     }
 
     // ── Actions ────────────────────────────────────────────────────────────

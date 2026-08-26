@@ -1,6 +1,5 @@
 package com.hourlock.app
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -9,7 +8,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -33,12 +31,12 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,10 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -63,16 +59,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * BlockedActivity
- * ────────────────
- * Strict fullscreen lock overlay displayed when an app reaches its hourly limit.
- * Features:
- *  - Live monospaced tabular countdown (no jitter / reflow)
- *  - Haptic feedback tick on appearance
- *  - Micro-pulsing lock geometry
- *  - "Return to Home" primary action
- */
 class BlockedActivity : ComponentActivity() {
 
     companion object {
@@ -127,27 +113,31 @@ fun BlockedScreen(
     val repo = remember { PrefsRepository(context) }
     val appLabel = remember(blockedPackage) { getAppLabel(context, blockedPackage) }
 
-    // Countdown state
     var secondsUntilUnlock by remember { mutableIntStateOf(0) }
-    var nextHourFormatted by remember { mutableStateOf("") }
+    var unlockTimeFormatted by remember { mutableStateOf("") }
+    var progressFraction by remember { mutableFloatStateOf(0f) }
 
-    // Trigger haptic feedback on appear
-    LaunchedEffect(Unit) {
+    LaunchedEffect(blockedPackage) {
         try {
             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
 
-        val sdf = SimpleDateFormat("h:00 a", Locale.getDefault())
+        val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
         while (true) {
-            val nextHourMillis = repo.nextHourStartMillis()
-            nextHourFormatted = sdf.format(Date(nextHourMillis))
-            secondsUntilUnlock = ((nextHourMillis - System.currentTimeMillis()) / 1000L)
-                .coerceAtLeast(0L).toInt()
+            val status = repo.getCurrentLimitStatus(blockedPackage)
+            val now = System.currentTimeMillis()
+            val unlockMillis = status.unlockAtMillis
+            unlockTimeFormatted = timeFormat.format(Date(unlockMillis))
+            secondsUntilUnlock = ((unlockMillis - now) / 1000L).coerceAtLeast(0L).toInt()
+
+            val windowDuration = (unlockMillis - status.activeBlock.blockStartMillis).coerceAtLeast(1L)
+            val remaining = (unlockMillis - now).coerceAtLeast(0L)
+            progressFraction = (remaining.toFloat() / windowDuration.toFloat()).coerceIn(0f, 1f)
             delay(1000L)
         }
     }
 
-    // Subtle breathing pulse for lock icon
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -174,11 +164,8 @@ fun BlockedScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Circular Progress Ring showing remaining fraction of the hour
-                val hourRemainingFraction = (secondsUntilUnlock.toFloat() / 3600f).coerceIn(0f, 1f)
-
                 RingProgress(
-                    progress = hourRemainingFraction,
+                    progress = progressFraction,
                     size = 130.dp,
                     strokeWidth = 8.dp,
                     trackColor = DesignTokens.Palette.DarkElevated,
@@ -208,7 +195,6 @@ fun BlockedScreen(
 
                 Spacer(Modifier.height(28.dp))
 
-                // Blocked App Pill Badge
                 Surface(
                     shape = DesignTokens.Shapes.Pill,
                     color = DesignTokens.Palette.DarkElevated,
@@ -229,7 +215,7 @@ fun BlockedScreen(
                 Spacer(Modifier.height(14.dp))
 
                 Text(
-                    text = "Hour Limit Reached",
+                    text = "Usage Locked",
                     style = DesignTokens.Typography.display().copy(
                         fontWeight = FontWeight.Bold,
                         color = DesignTokens.Palette.PureWhite,
@@ -241,7 +227,7 @@ fun BlockedScreen(
                 Spacer(Modifier.height(6.dp))
 
                 Text(
-                    text = "Take a break. You've reached your screen budget for this clock hour.",
+                    text = "Current schedule block has no remaining allowance.",
                     style = DesignTokens.Typography.body().copy(
                         color = DesignTokens.Palette.GraySecondary,
                         textAlign = TextAlign.Center,
@@ -252,7 +238,6 @@ fun BlockedScreen(
 
                 Spacer(Modifier.height(28.dp))
 
-                // Countdown Card with Tabular Monospaced Numbers
                 RoundedCard(
                     shape = DesignTokens.Shapes.Card,
                     containerColor = DesignTokens.Palette.DarkCard,
@@ -266,7 +251,7 @@ fun BlockedScreen(
                     ) {
                         Column {
                             Text(
-                                "NEXT RESET AT",
+                                "UNLOCKS AT",
                                 style = DesignTokens.Typography.caption().copy(
                                     color = DesignTokens.Palette.GrayMuted,
                                     letterSpacing = 1.2.sp,
@@ -275,7 +260,7 @@ fun BlockedScreen(
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                nextHourFormatted,
+                                unlockTimeFormatted,
                                 style = DesignTokens.Typography.title().copy(
                                     fontWeight = FontWeight.Bold,
                                     color = DesignTokens.Palette.PureWhite,
@@ -284,7 +269,6 @@ fun BlockedScreen(
                             )
                         }
 
-                        // Jitter-free Monospaced Digits
                         val minutesLeft = secondsUntilUnlock / 60
                         val secondsLeft = secondsUntilUnlock % 60
                         Surface(
@@ -306,12 +290,12 @@ fun BlockedScreen(
 
                 Spacer(Modifier.height(32.dp))
 
-                // Primary Return Home Button
                 Button(
                     onClick = {
                         try {
                             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                        } catch (_: Exception) {}
+                        } catch (_: Exception) {
+                        }
                         onGoHome()
                     },
                     modifier = Modifier

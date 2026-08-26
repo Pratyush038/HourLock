@@ -48,6 +48,9 @@ val KEY_BLOCKING_ENABLED = booleanPreferencesKey("blocking_enabled")
  */
 val KEY_PAUSE_UNTIL_MILLIS = longPreferencesKey("pause_until_millis")
 
+/** Epoch millis when Commitment Lock expires (0 when not active). */
+val KEY_COMMITMENT_LOCK_UNTIL_MILLIS = longPreferencesKey("commitment_lock_until_millis")
+
 // ── Per-package dynamic keys (generated at runtime) ────────────────────────────
 
 /**
@@ -62,17 +65,27 @@ fun usedSecondsKey(pkg: String) = intPreferencesKey("used_seconds_$pkg")
  * When currentTime >= hourStart + 3600_000 ms, we reset usedSeconds to 0
  * and update this value.
  */
-fun hourStartKey(pkg: String) = longPreferencesKey("hour_start_$pkg")
+fun quotaWindowStartKey(pkg: String) = longPreferencesKey("quota_window_start_$pkg")
 
 /**
- * Per-package limit in minutes. Key format: "limit_minutes_<packageName>".
- * Defaults to [DEFAULT_LIMIT_MINUTES] if not set.
+ * Signature of the active schedule block/rule used to account [usedSecondsKey].
+ * If this changes, usage is reset for the new block window.
  */
-fun limitMinutesKey(pkg: String) = intPreferencesKey("limit_minutes_$pkg")
+fun quotaWindowSignatureKey(pkg: String) = stringPreferencesKey("quota_window_signature_$pkg")
+
+/** Serialized per-package schedule block list. */
+fun scheduleBlocksKey(pkg: String) = stringPreferencesKey("schedule_blocks_$pkg")
+
+/** Per-package toggle for informational session check-in notifications. */
+fun sessionCheckInEnabledKey(pkg: String) = booleanPreferencesKey("session_checkin_enabled_$pkg")
+
+/** Per-package check-in interval in minutes. Allowed values: 3, 5, 10. */
+fun sessionCheckInIntervalMinutesKey(pkg: String) = intPreferencesKey("session_checkin_interval_minutes_$pkg")
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const val DEFAULT_LIMIT_MINUTES = 10
+const val DEFAULT_SESSION_CHECK_IN_INTERVAL_MINUTES = 5
 
 /**
  * Packages that can NEVER be blocked, regardless of what the user configures.
@@ -162,41 +175,67 @@ class PrefsRepository(private val context: Context) {
         dataStore.edit { prefs -> prefs[KEY_PAUSE_UNTIL_MILLIS] = 0L }
     }
 
+    // ─── Commitment lock ─────────────────────────────────────────────────
+
+    val commitmentLockUntilFlow: Flow<Long> = dataStore.data.map { prefs ->
+        prefs[KEY_COMMITMENT_LOCK_UNTIL_MILLIS] ?: 0L
+    }
+
+    val isCommitmentLockActiveFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        val until = prefs[KEY_COMMITMENT_LOCK_UNTIL_MILLIS] ?: 0L
+        until > System.currentTimeMillis()
+    }
+
+    suspend fun getCommitmentLockUntilMillis(): Long {
+        val prefs = dataStore.data.first()
+        val until = prefs[KEY_COMMITMENT_LOCK_UNTIL_MILLIS] ?: 0L
+        return if (until > System.currentTimeMillis()) until else 0L
+    }
+
+    suspend fun isCommitmentLockActive(): Boolean {
+        return getCommitmentLockUntilMillis() > System.currentTimeMillis()
+    }
+
+    suspend fun startCommitmentLock(durationMillis: Long) {
+        val until = System.currentTimeMillis() + durationMillis.coerceAtLeast(0L)
+        dataStore.edit { prefs -> prefs[KEY_COMMITMENT_LOCK_UNTIL_MILLIS] = until }
+    }
+
+    suspend fun clearCommitmentLock() {
+        dataStore.edit { prefs -> prefs[KEY_COMMITMENT_LOCK_UNTIL_MILLIS] = 0L }
+    }
+
     // ─── Per-package usage ─────────────────────────────────────────────────
 
     /**
-     * Flow of used-seconds for [pkg] in the current rolling hour.
-     * Automatically handles hour boundary resets by comparing [hourStartKey]
-     * against current system time.
+     * Flow of used-seconds for [pkg] in the current active quota window.
+     * The actual reset/write is performed by [getUsedSeconds]/[incrementUsedSeconds].
      */
     fun usedSecondsFlow(pkg: String): Flow<Int> = dataStore.data.map { prefs ->
-        val hourStart = prefs[hourStartKey(pkg)] ?: 0L
-        val now = System.currentTimeMillis()
-        val hourDuration = 3_600_000L
-        return@map if (now - hourStart >= hourDuration) {
-            // Hour has rolled over — report 0 (actual write happens in service)
-            0
-        } else {
-            prefs[usedSecondsKey(pkg)] ?: 0
-        }
+        prefs[usedSecondsKey(pkg)] ?: 0
     }
 
     /**
-     * Get used seconds and limit for [pkg]. Handles hour rollover:
-     * if the stored hourStart is from a previous hour, resets usedSeconds to 0
-     * and writes the new hourStart before returning.
-     *
-     * This is the primary function called by UsageTrackerService on each tick.
+     * Get used seconds for [pkg] in its active schedule quota window.
+     * The usage counter resets when either:
+     *  - The quota window boundary changes (hour boundary for hourly quota).
+     *  - The active schedule block/rule changes.
      */
     suspend fun getUsedSeconds(pkg: String): Int {
+        val schedule = getScheduleForPackage(pkg)
+        val active = resolveActiveBlock(schedule)
+        val expectedWindowStart = expectedQuotaWindowStartMillis(active)
+        val expectedSignature = blockSignature(active)
+
         val prefs = dataStore.data.first()
-        val hourStart = prefs[hourStartKey(pkg)] ?: 0L
-        val currentHour = currentHourStartMillis()
-        return if (hourStart != currentHour) {
-            // New clock hour — reset
+        val storedWindowStart = prefs[quotaWindowStartKey(pkg)] ?: Long.MIN_VALUE
+        val storedSignature = prefs[quotaWindowSignatureKey(pkg)] ?: ""
+
+        return if (storedWindowStart != expectedWindowStart || storedSignature != expectedSignature) {
             dataStore.edit { p ->
                 p[usedSecondsKey(pkg)] = 0
-                p[hourStartKey(pkg)] = currentHour
+                p[quotaWindowStartKey(pkg)] = expectedWindowStart
+                p[quotaWindowSignatureKey(pkg)] = expectedSignature
             }
             0
         } else {
@@ -206,18 +245,21 @@ class PrefsRepository(private val context: Context) {
 
     /**
      * Atomically increment usedSeconds for [pkg] by 1 and persist.
-     * Called on every 1-second tick while the monitored app is in foreground.
-     * We write on EVERY tick (not just on stop) so that if the process is
-     * killed by the OS, we don't lose the accumulated count for the current hour.
+     * Accounting follows the active schedule block and its rule type.
      */
     suspend fun incrementUsedSeconds(pkg: String): Int {
+        val schedule = getScheduleForPackage(pkg)
+        val active = resolveActiveBlock(schedule)
+        val expectedWindowStart = expectedQuotaWindowStartMillis(active)
+        val expectedSignature = blockSignature(active)
+
         var newValue = 0
         dataStore.edit { prefs ->
-            val hourStart = prefs[hourStartKey(pkg)] ?: 0L
-            val currentHour = currentHourStartMillis()
-            val current = if (hourStart != currentHour) {
-                // Hour rolled over mid-session — reset before incrementing
-                prefs[hourStartKey(pkg)] = currentHour
+            val storedWindowStart = prefs[quotaWindowStartKey(pkg)] ?: Long.MIN_VALUE
+            val storedSignature = prefs[quotaWindowSignatureKey(pkg)] ?: ""
+            val current = if (storedWindowStart != expectedWindowStart || storedSignature != expectedSignature) {
+                prefs[quotaWindowStartKey(pkg)] = expectedWindowStart
+                prefs[quotaWindowSignatureKey(pkg)] = expectedSignature
                 0
             } else {
                 prefs[usedSecondsKey(pkg)] ?: 0
@@ -253,20 +295,238 @@ class PrefsRepository(private val context: Context) {
         return cal.timeInMillis
     }
 
-    // ─── Per-package limit ─────────────────────────────────────────────────
+    // ─── Per-package schedule limits ──────────────────────────────────────
 
-    fun limitMinutesFlow(pkg: String): Flow<Int> = dataStore.data.map { prefs ->
-        prefs[limitMinutesKey(pkg)] ?: DEFAULT_LIMIT_MINUTES
+    fun scheduleFlow(pkg: String): Flow<List<ScheduleBlock>> = dataStore.data.map { prefs ->
+        val encoded = prefs[scheduleBlocksKey(pkg)]
+        val parsed = decodeSchedule(encoded)
+        if (parsed.isEmpty()) defaultSimpleSchedule() else parsed
+    }
+
+    suspend fun getScheduleForPackage(pkg: String): List<ScheduleBlock> {
+        val prefs = dataStore.data.first()
+        val parsed = decodeSchedule(prefs[scheduleBlocksKey(pkg)])
+        if (parsed.isNotEmpty()) return parsed
+
+        val fallback = defaultSimpleSchedule()
+        setScheduleForPackage(pkg, fallback)
+        return fallback
+    }
+
+    suspend fun setScheduleForPackage(pkg: String, blocks: List<ScheduleBlock>): ScheduleValidationResult {
+        val validation = validateSchedule(blocks)
+        if (!validation.isValid) return validation
+        val encoded = encodeSchedule(blocks)
+        dataStore.edit { prefs -> prefs[scheduleBlocksKey(pkg)] = encoded }
+        return ScheduleValidationResult(isValid = true)
+    }
+
+    suspend fun copySchedule(sourcePkg: String, targetPkgs: Set<String>) {
+        val source = getScheduleForPackage(sourcePkg)
+        for (pkg in targetPkgs) {
+            setScheduleForPackage(pkg, source)
+        }
+    }
+
+    suspend fun getActiveScheduleBlock(pkg: String): ActiveScheduleBlock {
+        val schedule = getScheduleForPackage(pkg)
+        return resolveActiveBlock(schedule)
     }
 
     suspend fun getLimitSeconds(pkg: String): Int {
-        val prefs = dataStore.data.first()
-        val minutes = prefs[limitMinutesKey(pkg)] ?: DEFAULT_LIMIT_MINUTES
-        return minutes * 60
+        val active = getActiveScheduleBlock(pkg)
+        return (active.block.limitMinutes.coerceAtLeast(0)) * 60
     }
 
-    suspend fun setLimitMinutes(pkg: String, minutes: Int) {
-        dataStore.edit { prefs -> prefs[limitMinutesKey(pkg)] = minutes.coerceIn(1, 60) }
+    suspend fun getCurrentLimitStatus(pkg: String): CurrentLimitStatus {
+        val active = getActiveScheduleBlock(pkg)
+        val used = getUsedSeconds(pkg)
+        val limitSeconds = active.block.limitMinutes.coerceAtLeast(0) * 60
+        val blocked = used >= limitSeconds
+        return CurrentLimitStatus(
+            limitSeconds = limitSeconds,
+            usedSeconds = used,
+            isBlocked = blocked,
+            activeBlock = active,
+            unlockAtMillis = calculateUnlockAtMillis(active)
+        )
+    }
+
+    suspend fun nextUnlockMillisForPackage(pkg: String): Long {
+        val active = getActiveScheduleBlock(pkg)
+        return calculateUnlockAtMillis(active)
+    }
+
+    suspend fun resetCurrentQuotaCounters(pkgs: Set<String>) {
+        for (pkg in pkgs) {
+            val schedule = getScheduleForPackage(pkg)
+            val active = resolveActiveBlock(schedule)
+            dataStore.edit { prefs ->
+                prefs[usedSecondsKey(pkg)] = 0
+                prefs[quotaWindowStartKey(pkg)] = expectedQuotaWindowStartMillis(active)
+                prefs[quotaWindowSignatureKey(pkg)] = blockSignature(active)
+            }
+        }
+    }
+
+    // ─── Per-package session check-ins ───────────────────────────────────
+
+    fun sessionCheckInEnabledFlow(pkg: String): Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[sessionCheckInEnabledKey(pkg)] ?: true
+    }
+
+    suspend fun isSessionCheckInEnabled(pkg: String): Boolean {
+        val prefs = dataStore.data.first()
+        return prefs[sessionCheckInEnabledKey(pkg)] ?: true
+    }
+
+    suspend fun setSessionCheckInEnabled(pkg: String, enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[sessionCheckInEnabledKey(pkg)] = enabled }
+    }
+
+    fun sessionCheckInIntervalMinutesFlow(pkg: String): Flow<Int> = dataStore.data.map { prefs ->
+        val raw = prefs[sessionCheckInIntervalMinutesKey(pkg)] ?: DEFAULT_SESSION_CHECK_IN_INTERVAL_MINUTES
+        raw.coerceIn(3, 10).let { if (it in setOf(3, 5, 10)) it else DEFAULT_SESSION_CHECK_IN_INTERVAL_MINUTES }
+    }
+
+    suspend fun getSessionCheckInIntervalMinutes(pkg: String): Int {
+        val prefs = dataStore.data.first()
+        val raw = prefs[sessionCheckInIntervalMinutesKey(pkg)] ?: DEFAULT_SESSION_CHECK_IN_INTERVAL_MINUTES
+        return if (raw in setOf(3, 5, 10)) raw else DEFAULT_SESSION_CHECK_IN_INTERVAL_MINUTES
+    }
+
+    suspend fun setSessionCheckInIntervalMinutes(pkg: String, minutes: Int) {
+        val normalized = when (minutes) {
+            3, 5, 10 -> minutes
+            else -> DEFAULT_SESSION_CHECK_IN_INTERVAL_MINUTES
+        }
+        dataStore.edit { prefs -> prefs[sessionCheckInIntervalMinutesKey(pkg)] = normalized }
+    }
+
+    // ─── Schedule helpers ─────────────────────────────────────────────────
+
+    fun validateSchedule(blocks: List<ScheduleBlock>): ScheduleValidationResult {
+        if (blocks.isEmpty()) {
+            return ScheduleValidationResult(false, "Schedule cannot be empty")
+        }
+
+        val sorted = blocks.sortedBy { it.startMinuteOfDay }
+        if (sorted.first().startMinuteOfDay != 0) {
+            return ScheduleValidationResult(false, "Schedule must start at 12:00 AM")
+        }
+
+        var expectedStart = 0
+        for ((index, block) in sorted.withIndex()) {
+            if (block.startMinuteOfDay != expectedStart) {
+                return ScheduleValidationResult(
+                    false,
+                    "Gap or overlap near block ${index + 1}; each block must start where the previous ends"
+                )
+            }
+            if (block.endMinuteOfDay <= block.startMinuteOfDay) {
+                return ScheduleValidationResult(false, "Each block must end after it starts")
+            }
+            if (block.endMinuteOfDay > 24 * 60) {
+                return ScheduleValidationResult(false, "Schedule cannot extend past 12:00 AM")
+            }
+            if (block.limitMinutes < 0) {
+                return ScheduleValidationResult(false, "Limit minutes cannot be negative")
+            }
+            expectedStart = block.endMinuteOfDay
+        }
+
+        if (expectedStart != 24 * 60) {
+            return ScheduleValidationResult(false, "Schedule must cover full 24 hours")
+        }
+
+        return ScheduleValidationResult(isValid = true)
+    }
+
+    private fun encodeSchedule(blocks: List<ScheduleBlock>): String {
+        return blocks.joinToString(separator = "|") { block ->
+            "${block.startMinuteOfDay},${block.endMinuteOfDay},${block.ruleType.name},${block.limitMinutes}"
+        }
+    }
+
+    private fun decodeSchedule(encoded: String?): List<ScheduleBlock> {
+        if (encoded.isNullOrBlank()) return emptyList()
+
+        val blocks = mutableListOf<ScheduleBlock>()
+        val parts = encoded.split("|")
+        for (part in parts) {
+            val fields = part.split(",")
+            if (fields.size != 4) return emptyList()
+
+            val start = fields[0].toIntOrNull() ?: return emptyList()
+            val end = fields[1].toIntOrNull() ?: return emptyList()
+            val type = runCatching { ScheduleRuleType.valueOf(fields[2]) }.getOrNull() ?: return emptyList()
+            val minutes = fields[3].toIntOrNull() ?: return emptyList()
+
+            blocks += ScheduleBlock(
+                startMinuteOfDay = start,
+                endMinuteOfDay = end,
+                ruleType = type,
+                limitMinutes = minutes
+            )
+        }
+
+        return if (validateSchedule(blocks).isValid) blocks.sortedBy { it.startMinuteOfDay } else emptyList()
+    }
+
+    private fun resolveActiveBlock(blocks: List<ScheduleBlock>): ActiveScheduleBlock {
+        val now = java.util.Calendar.getInstance()
+        val minuteOfDay = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
+
+        val sorted = blocks.sortedBy { it.startMinuteOfDay }
+        val index = sorted.indexOfFirst { minuteOfDay >= it.startMinuteOfDay && minuteOfDay < it.endMinuteOfDay }
+            .let { if (it == -1) sorted.lastIndex else it }
+        val block = sorted[index]
+
+        val midnight = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val blockStartMillis = midnight + block.startMinuteOfDay * 60_000L
+        val blockEndMillis = midnight + block.endMinuteOfDay * 60_000L
+
+        return ActiveScheduleBlock(
+            block = block,
+            blockIndex = index,
+            blockStartMillis = blockStartMillis,
+            blockEndMillis = blockEndMillis
+        )
+    }
+
+    private fun expectedQuotaWindowStartMillis(active: ActiveScheduleBlock): Long {
+        return when (active.block.ruleType) {
+            ScheduleRuleType.HOURLY_QUOTA -> {
+                val currentHour = currentHourStartMillis()
+                maxOf(currentHour, active.blockStartMillis)
+            }
+            ScheduleRuleType.FLAT_ALLOWANCE -> active.blockStartMillis
+        }
+    }
+
+    private fun blockSignature(active: ActiveScheduleBlock): String {
+        val b = active.block
+        return "${active.blockIndex}:${b.startMinuteOfDay}-${b.endMinuteOfDay}:${b.ruleType.name}:${b.limitMinutes}"
+    }
+
+    private fun calculateUnlockAtMillis(active: ActiveScheduleBlock): Long {
+        return when (active.block.ruleType) {
+            ScheduleRuleType.HOURLY_QUOTA -> {
+                if (active.block.limitMinutes <= 0) {
+                    active.blockEndMillis
+                } else {
+                    val nextHour = currentHourStartMillis() + 3_600_000L
+                    minOf(nextHour, active.blockEndMillis)
+                }
+            }
+            ScheduleRuleType.FLAT_ALLOWANCE -> active.blockEndMillis
+        }
     }
 
     // ─── Today's total usage (calculated from local midnight 00:00:00) ──────

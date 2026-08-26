@@ -44,7 +44,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,7 +61,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hourlock.app.data.UsageLogRepository
-import com.hourlock.app.ui.components.MonochromeSlider
 import com.hourlock.app.ui.components.MonochromeSwitch
 import com.hourlock.app.ui.components.RingProgress
 import com.hourlock.app.ui.components.RoundedCard
@@ -72,6 +70,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * HomeScreen
@@ -98,7 +99,9 @@ fun HomeScreen(
     val monitoredPackages by repo.monitoredPackagesFlow.collectAsState(initial = setOf("com.instagram.android"))
     val blockingEnabled by repo.blockingEnabledFlow.collectAsState(initial = true)
     val pauseUntil by repo.pauseUntilFlow.collectAsState(initial = 0L)
+    val commitmentLockUntil by repo.commitmentLockUntilFlow.collectAsState(initial = 0L)
     val isPaused = System.currentTimeMillis() < pauseUntil
+    val isCommitmentLockActive = commitmentLockUntil > System.currentTimeMillis()
 
     // ── Permission state ───────────────────────────────────────────────────
     var a11yGranted by remember { mutableStateOf(false) }
@@ -115,12 +118,14 @@ fun HomeScreen(
     // ── Per-app live usage ticker ──────────────────────────────────────────
     val usedSecondsMap = remember { mutableStateMapOf<String, Int>() }
     val limitMinutesMap = remember { mutableStateMapOf<String, Int>() }
+    val activeBlockLabelMap = remember { mutableStateMapOf<String, String>() }
     val todaySecondsMap = remember { mutableStateMapOf<String, Long>() }
     LaunchedEffect(monitoredPackages) {
         while (true) {
             for (pkg in monitoredPackages) {
                 usedSecondsMap[pkg] = repo.getUsedSeconds(pkg)
                 limitMinutesMap[pkg] = repo.getLimitSeconds(pkg) / 60
+                activeBlockLabelMap[pkg] = formatBlockLabel(repo.getActiveScheduleBlock(pkg).block)
                 todaySecondsMap[pkg] = repo.getTodayTotalSeconds(pkg, context)
             }
             delay(1000L)
@@ -235,6 +240,26 @@ fun HomeScreen(
                 }
             }
 
+            if (isCommitmentLockActive) {
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = DesignTokens.Shapes.Card,
+                        color = DesignTokens.Palette.DarkCard,
+                        border = BorderStroke(1.dp, DesignTokens.Palette.WarningAccentBorder)
+                    ) {
+                        Text(
+                            text = "Committed until ${formatLockUntil(commitmentLockUntil)}",
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            style = DesignTokens.Typography.bodySmall().copy(
+                                color = DesignTokens.Palette.WarningAccent,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                    }
+                }
+            }
+
 
 
             // ── 3. FULL-WIDTH MASTER ON/OFF TOGGLE CARD ────────────────────────
@@ -251,6 +276,7 @@ fun HomeScreen(
                     borderColor = cardBorder,
                     contentPadding = 20.dp,
                     onClick = {
+                        if (isCommitmentLockActive && blockingEnabled) return@RoundedCard
                         try { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) } catch (_: Exception) {}
                         scope.launch { repo.setBlockingEnabled(!blockingEnabled) }
                     }
@@ -305,8 +331,10 @@ fun HomeScreen(
                         MonochromeSwitch(
                             checked = blockingEnabled,
                             onCheckedChange = { checked ->
+                                if (isCommitmentLockActive && !checked) return@MonochromeSwitch
                                 scope.launch { repo.setBlockingEnabled(checked) }
-                            }
+                            },
+                            enabled = !(isCommitmentLockActive && blockingEnabled)
                         )
                     }
 
@@ -435,6 +463,7 @@ fun HomeScreen(
                         pkg = pkg,
                         usedSeconds = usedSec,
                         limitMinutes = limitMin,
+                        activeBlockLabel = activeBlockLabelMap[pkg] ?: "",
                         todaySeconds = todaySec,
                         isBlocked = isAppBlocked,
                         onClick = {
@@ -464,16 +493,10 @@ fun HomeScreen(
 
     // ── EDIT APP LIMIT MODAL DIALOG ────────────────────────────────────────
     editingPkg?.let { pkg ->
-        val currentLimit = limitMinutesMap[pkg] ?: DEFAULT_LIMIT_MINUTES
         EditLimitDialog(
             pkg = pkg,
-            currentLimitMinutes = currentLimit,
-            onSaveLimit = { newLimit ->
-                scope.launch {
-                    repo.setLimitMinutes(pkg, newLimit)
-                    editingPkg = null
-                }
-            },
+            canRemove = !isCommitmentLockActive,
+            commitmentLockUntilMillis = commitmentLockUntil,
             onRemove = {
                 scope.launch {
                     repo.setMonitoredPackages(monitoredPackages - pkg)
@@ -492,6 +515,7 @@ private fun AppLockRowCard(
     pkg: String,
     usedSeconds: Int,
     limitMinutes: Int,
+    activeBlockLabel: String,
     todaySeconds: Long,
     isBlocked: Boolean,
     onClick: () -> Unit
@@ -584,6 +608,19 @@ private fun AppLockRowCard(
                         fontSize = 12.sp
                     )
                 )
+
+                if (activeBlockLabel.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = activeBlockLabel,
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.GrayMuted,
+                            fontSize = 10.sp
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             // Right remaining pill
@@ -860,14 +897,13 @@ private fun AddAppDialog(
 @Composable
 private fun EditLimitDialog(
     pkg: String,
-    currentLimitMinutes: Int,
-    onSaveLimit: (Int) -> Unit,
+    canRemove: Boolean,
+    commitmentLockUntilMillis: Long,
     onRemove: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val appLabel = remember(pkg) { getAppLabel(context, pkg) }
-    var limitSlider by remember { mutableIntStateOf(currentLimitMinutes) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -888,30 +924,19 @@ private fun EditLimitDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    "Set hourly screen time budget:",
+                    "Schedule limits are managed in Settings > Monitored App Schedules.",
                     style = DesignTokens.Typography.body().copy(color = DesignTokens.Palette.GraySecondary)
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (!canRemove) {
                     Text(
-                        "${limitSlider} min / hour",
-                        style = DesignTokens.Typography.subtitle().copy(
-                            fontWeight = FontWeight.Bold,
-                            color = DesignTokens.Palette.PureWhite
+                        "Removing this app is locked until ${formatLockUntil(commitmentLockUntilMillis)}.",
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.WarningAccent,
+                            fontSize = 11.sp
                         )
                     )
                 }
-
-                MonochromeSlider(
-                    value = limitSlider.toFloat(),
-                    onValueChange = { limitSlider = it.toInt() },
-                    valueRange = 1f..60f,
-                    steps = 58
-                )
 
                 Spacer(Modifier.height(8.dp))
 
@@ -919,10 +944,13 @@ private fun EditLimitDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(DesignTokens.Shapes.Button)
-                        .clickable { onRemove() },
+                        .clickable(enabled = canRemove) { onRemove() },
                     shape = DesignTokens.Shapes.Button,
-                    color = DesignTokens.Palette.StatusErrorMuted,
-                    border = BorderStroke(1.dp, DesignTokens.Palette.StatusError.copy(alpha = 0.4f))
+                    color = if (canRemove) DesignTokens.Palette.StatusErrorMuted else DesignTokens.Palette.DarkElevated,
+                    border = BorderStroke(
+                        1.dp,
+                        if (canRemove) DesignTokens.Palette.StatusError.copy(alpha = 0.4f) else DesignTokens.Palette.DarkBorder
+                    )
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
@@ -932,7 +960,7 @@ private fun EditLimitDialog(
                         Text(
                             "Remove from Guard List",
                             style = DesignTokens.Typography.caption().copy(
-                                color = DesignTokens.Palette.StatusError,
+                                color = if (canRemove) DesignTokens.Palette.StatusError else DesignTokens.Palette.GrayMuted,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -941,8 +969,8 @@ private fun EditLimitDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSaveLimit(limitSlider) }) {
-                Text("Save", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -973,6 +1001,12 @@ private fun getAppLabel(context: Context, pkg: String): String {
     } catch (_: Exception) {
         pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
     }
+}
+
+private fun formatLockUntil(untilMillis: Long): String {
+    if (untilMillis <= 0L) return "-"
+    val sdf = SimpleDateFormat("EEE h:mm a", Locale.getDefault())
+    return sdf.format(Date(untilMillis))
 }
 
 fun isAccessibilityServiceEnabled(context: Context): Boolean {
