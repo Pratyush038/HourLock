@@ -993,22 +993,6 @@ private fun formatDuration(totalSeconds: Long): String {
     }
 }
 
-private fun getAppLabel(context: Context, pkg: String): String {
-    return try {
-        val pm = context.packageManager
-        val info = pm.getApplicationInfo(pkg, 0)
-        pm.getApplicationLabel(info).toString()
-    } catch (_: Exception) {
-        pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
-    }
-}
-
-private fun formatLockUntil(untilMillis: Long): String {
-    if (untilMillis <= 0L) return "-"
-    val sdf = SimpleDateFormat("EEE h:mm a", Locale.getDefault())
-    return sdf.format(Date(untilMillis))
-}
-
 fun isAccessibilityServiceEnabled(context: Context): Boolean {
     return try {
         val enabledServices = Settings.Secure.getString(

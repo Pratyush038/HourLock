@@ -1319,12 +1319,6 @@ private fun SectionHeader(title: String) {
     )
 }
 
-private fun formatLockUntil(untilMillis: Long): String {
-    if (untilMillis <= 0L) return "-"
-    val sdf = SimpleDateFormat("EEE h:mm a", Locale.getDefault())
-    return sdf.format(Date(untilMillis))
-}
-
 private fun isScheduleTighteningOrEqual(
     original: List<ScheduleBlock>,
     candidate: List<ScheduleBlock>
@@ -1358,12 +1352,3 @@ private fun scheduleStrictnessByMinute(blocks: List<ScheduleBlock>): FloatArray 
     return result
 }
 
-private fun getAppLabel(context: Context, pkg: String): String {
-    return try {
-        val pm = context.packageManager
-        val info = pm.getApplicationInfo(pkg, 0)
-        pm.getApplicationLabel(info).toString()
-    } catch (_: Exception) {
-        pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
-    }
-}

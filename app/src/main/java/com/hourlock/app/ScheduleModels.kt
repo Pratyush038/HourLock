@@ -1,5 +1,6 @@
 package com.hourlock.app
 
+import android.content.Context
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -87,3 +88,20 @@ fun weekendPreset(): List<ScheduleBlock> {
         ScheduleBlock(16 * 60, 24 * 60, ScheduleRuleType.HOURLY_QUOTA, 30)
     )
 }
+
+fun getAppLabel(context: Context, pkg: String): String {
+    return try {
+        val pm = context.packageManager
+        val info = pm.getApplicationInfo(pkg, 0)
+        pm.getApplicationLabel(info).toString()
+    } catch (_: Exception) {
+        pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
+    }
+}
+
+fun formatLockUntil(untilMillis: Long): String {
+    if (untilMillis <= 0L) return "-"
+    val sdf = SimpleDateFormat("EEE h:mm a", Locale.getDefault())
+    return sdf.format(Date(untilMillis))
+}
+
