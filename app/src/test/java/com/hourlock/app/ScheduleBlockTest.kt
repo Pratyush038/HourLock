@@ -242,6 +242,11 @@ class ScheduleBlockTest {
     fun testFormatHelpersHandleEdges() {
         assertEquals("00:00", formatMinuteOfDay24H(-1))
         assertEquals("24:00", formatMinuteOfDay24H(24 * 60 + 1))
+        assertEquals("12 AM", formatMinuteOfDayCasual(0))
+        assertEquals("10 PM", formatMinuteOfDayCasual(22 * 60))
+        assertEquals("10:30 PM", formatMinuteOfDayCasual(22 * 60 + 30))
+        assertEquals("noon", formatMinuteOfDayCasual(12 * 60))
+        assertEquals("midnight", formatMinuteOfDayCasual(24 * 60))
         assertEquals("0m", formatBlockDuration(60, 30))
         assertEquals("1h 15m", formatBlockDuration(0, 75))
     }

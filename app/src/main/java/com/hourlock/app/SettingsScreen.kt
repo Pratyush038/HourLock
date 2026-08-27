@@ -1,5 +1,6 @@
 package com.hourlock.app
 
+import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -1233,7 +1234,7 @@ private fun CustomWindowRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "${formatMinuteOfDay(window.startMinuteOfDay)} - ${formatMinuteOfDay(window.endMinuteOfDay)}",
+                    "${formatMinuteOfDayCasual(window.startMinuteOfDay)} - ${formatMinuteOfDayCasual(window.endMinuteOfDay)}",
                     style = DesignTokens.Typography.bodyMedium().copy(
                         color = DesignTokens.Palette.PureWhite,
                         fontWeight = FontWeight.Bold,
@@ -1271,12 +1272,11 @@ private fun EditCustomWindowDialog(
     onSave: (ScheduleOverride) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var startMinute by remember(window) { mutableIntStateOf(window.startMinuteOfDay) }
     var endMinute by remember(window) { mutableIntStateOf(window.endMinuteOfDay) }
     var ruleType by remember(window) { mutableStateOf(window.ruleType) }
     var limitMinutes by remember(window) { mutableIntStateOf(window.limitMinutes) }
-    var activeTimeTab by remember { mutableIntStateOf(0) }
-    val isValid = endMinute > startMinute
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1293,7 +1293,7 @@ private fun EditCustomWindowDialog(
                     )
                 )
                 Text(
-                    "${formatMinuteOfDay(startMinute)} - ${formatMinuteOfDay(endMinute)}",
+                    "${formatMinuteOfDayCasual(startMinute)} - ${formatMinuteOfDayCasual(endMinute)}",
                     style = DesignTokens.Typography.bodySmall().copy(
                         color = DesignTokens.Palette.GrayMuted,
                         fontSize = 12.sp
@@ -1306,36 +1306,47 @@ private fun EditCustomWindowDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Text(
+                    "WHEN DOES THIS APPLY?",
+                    style = DesignTokens.Typography.caption().copy(
+                        color = DesignTokens.Palette.GrayMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    IntervalChip(label = "Start", selected = activeTimeTab == 0) { activeTimeTab = 0 }
-                    IntervalChip(label = "End", selected = activeTimeTab == 1) { activeTimeTab = 1 }
-                }
-
-                if (activeTimeTab == 0) {
-                    com.hourlock.app.ui.components.TimeWheelPicker(
-                        minuteOfDay = startMinute,
-                        onMinuteOfDayChanged = { selected ->
-                            startMinute = selected.coerceAtMost(23 * 60 + 55)
-                            if (endMinute <= startMinute) {
-                                endMinute = (startMinute + 60).coerceAtMost(24 * 60)
-                            }
-                        },
-                        minMinute = 0,
-                        maxMinute = (endMinute - 5).coerceAtLeast(0),
-                        allow24HourEnd = false
+                    TimeChoiceButton(
+                        label = "From",
+                        timeText = formatMinuteOfDayCasual(startMinute),
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            showNativeTimePicker(
+                                context = context,
+                                minuteOfDay = startMinute,
+                                minMinute = 0,
+                                maxMinute = (endMinute - 5).coerceAtLeast(0),
+                                onSelected = { selected -> startMinute = selected }
+                            )
+                        }
                     )
-                } else {
-                    com.hourlock.app.ui.components.TimeWheelPicker(
-                        minuteOfDay = endMinute,
-                        onMinuteOfDayChanged = { selected ->
-                            endMinute = selected.coerceAtLeast(startMinute + 5).coerceAtMost(24 * 60)
-                        },
-                        minMinute = (startMinute + 5).coerceAtMost(24 * 60),
-                        maxMinute = 24 * 60,
-                        allow24HourEnd = true
+                    TimeChoiceButton(
+                        label = "Until",
+                        timeText = formatMinuteOfDayCasual(endMinute),
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            showNativeTimePicker(
+                                context = context,
+                                minuteOfDay = endMinute,
+                                minMinute = (startMinute + 5).coerceAtMost(24 * 60),
+                                maxMinute = 24 * 60,
+                                allowMidnight = true,
+                                onSelected = { selected -> endMinute = selected }
+                            )
+                        }
                     )
                 }
 
@@ -1361,15 +1372,6 @@ private fun EditCustomWindowDialog(
                     onLimitMinutesChanged = { limitMinutes = it }
                 )
 
-                if (!isValid) {
-                    Text(
-                        "End time must be after start time.",
-                        style = DesignTokens.Typography.bodySmall().copy(
-                            color = DesignTokens.Palette.WarningAccent,
-                            fontSize = 11.sp
-                        )
-                    )
-                }
             }
         },
         confirmButton = {
@@ -1384,7 +1386,7 @@ private fun EditCustomWindowDialog(
                         )
                     )
                 },
-                enabled = isValid
+                enabled = endMinute > startMinute
             ) {
                 Text("Apply", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
             }
@@ -1395,6 +1397,73 @@ private fun EditCustomWindowDialog(
             }
         }
     )
+}
+
+@Composable
+private fun TimeChoiceButton(
+    label: String,
+    timeText: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier
+            .clip(DesignTokens.Shapes.Button)
+            .clickable(onClick = onClick),
+        shape = DesignTokens.Shapes.Button,
+        color = DesignTokens.Palette.DarkElevated,
+        border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                label,
+                style = DesignTokens.Typography.caption().copy(
+                    color = DesignTokens.Palette.GrayMuted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            )
+            Text(
+                timeText,
+                style = DesignTokens.Typography.bodyMedium().copy(
+                    color = DesignTokens.Palette.PureWhite,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+            )
+        }
+    }
+}
+
+private fun showNativeTimePicker(
+    context: Context,
+    minuteOfDay: Int,
+    minMinute: Int,
+    maxMinute: Int,
+    allowMidnight: Boolean = false,
+    onSelected: (Int) -> Unit
+) {
+    val pickerMinute = minuteOfDay
+        .coerceIn(minMinute, maxMinute)
+        .let { if (allowMidnight && it == 24 * 60) 0 else it }
+    TimePickerDialog(
+        context,
+        { _, hour, minute ->
+            val rawSelected = hour * 60 + minute
+            val selected = if (allowMidnight && rawSelected == 0) {
+                24 * 60
+            } else {
+                rawSelected.coerceIn(minMinute, maxMinute)
+            }
+            onSelected(selected)
+        },
+        pickerMinute / 60,
+        pickerMinute % 60,
+        false
+    ).show()
 }
 
 private fun nextSuggestedOverrideStart(windows: List<ScheduleOverride>): Int {

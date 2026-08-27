@@ -218,6 +218,25 @@ fun formatMinuteOfDay24H(minuteOfDay: Int): String {
     return String.format(Locale.US, "%02d:%02d", hour, minute)
 }
 
+fun formatMinuteOfDayCasual(minuteOfDay: Int): String {
+    val normalized = minuteOfDay.coerceIn(0, 24 * 60)
+    if (normalized == 24 * 60) return "midnight"
+    if (normalized == 12 * 60) return "noon"
+
+    val hour24 = normalized / 60
+    val minute = normalized % 60
+    val suffix = if (hour24 < 12) "AM" else "PM"
+    val hour12 = when (val hour = hour24 % 12) {
+        0 -> 12
+        else -> hour
+    }
+    return if (minute == 0) {
+        "$hour12 $suffix"
+    } else {
+        String.format(Locale.US, "%d:%02d %s", hour12, minute, suffix)
+    }
+}
+
 fun formatBlockDuration(startMinute: Int, endMinute: Int): String {
     val durationMinutes = (endMinute - startMinute).coerceAtLeast(0)
     val h = durationMinutes / 60
