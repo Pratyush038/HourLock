@@ -785,8 +785,14 @@ private fun MonitoredAppBudgetRowCard(
                             fontSize = 15.sp
                         )
                     )
+                    val defaultLimit = inferDefaultLimitMinutes(schedule)
+                    val customWindowCount = scheduleOverrides(schedule, defaultLimit).size
                     Text(
-                        text = "${schedule.size} block schedule",
+                        text = if (customWindowCount == 0) {
+                            "Default ${defaultLimit} min/hour all day"
+                        } else {
+                            "Default ${defaultLimit} min/hour + $customWindowCount custom window${if (customWindowCount == 1) "" else "s"}"
+                        },
                         style = DesignTokens.Typography.bodySmall().copy(
                             color = DesignTokens.Palette.GraySecondary,
                             fontSize = 12.sp
@@ -817,15 +823,43 @@ private fun MonitoredAppBudgetRowCard(
 
         Spacer(Modifier.height(10.dp))
 
-        schedule.forEach { block ->
+        val defaultLimit = inferDefaultLimitMinutes(schedule)
+        Text(
+            text = "Default: ${defaultLimit} min/hour",
+            style = DesignTokens.Typography.bodySmall().copy(
+                color = DesignTokens.Palette.PureWhite,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.sp
+            )
+        )
+        Spacer(Modifier.height(4.dp))
+
+        val customWindows = scheduleOverrides(schedule, defaultLimit)
+        if (customWindows.isEmpty()) {
             Text(
-                text = formatBlockLabel(block),
+                text = "No custom windows. This app uses the default limit all day.",
                 style = DesignTokens.Typography.bodySmall().copy(
                     color = DesignTokens.Palette.GraySecondary,
                     fontSize = 12.sp
                 )
             )
-            Spacer(Modifier.height(4.dp))
+        } else {
+            customWindows.forEach { window ->
+                val block = ScheduleBlock(
+                    startMinuteOfDay = window.startMinuteOfDay,
+                    endMinuteOfDay = window.endMinuteOfDay,
+                    ruleType = window.ruleType,
+                    limitMinutes = window.limitMinutes
+                )
+                Text(
+                    text = formatBlockLabel(block),
+                    style = DesignTokens.Typography.bodySmall().copy(
+                        color = DesignTokens.Palette.GraySecondary,
+                        fontSize = 12.sp
+                    )
+                )
+                Spacer(Modifier.height(4.dp))
+            }
         }
 
         Spacer(Modifier.height(6.dp))
@@ -840,7 +874,7 @@ private fun MonitoredAppBudgetRowCard(
             border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
         ) {
             Text(
-                text = "Edit Schedule",
+                text = "Edit Limits",
                 modifier = Modifier.padding(vertical = 10.dp),
                 style = DesignTokens.Typography.caption().copy(
                     color = DesignTokens.Palette.PureWhite,
@@ -923,7 +957,6 @@ private fun MonitoredAppBudgetRowCard(
             isCommitmentLockActive = isCommitmentLockActive,
             commitmentLockUntilMillis = commitmentLockUntilMillis,
             onDismiss = { showScheduleEditor = false },
-            validateSchedule = { blocks -> repo.validateSchedule(blocks) },
             onSave = { blocks ->
                 scope.launch {
                     val result = repo.setScheduleForPackage(pkg, blocks)
@@ -983,19 +1016,20 @@ private fun ScheduleEditorDialog(
     initialSchedule: List<ScheduleBlock>,
     isCommitmentLockActive: Boolean,
     commitmentLockUntilMillis: Long,
-    validateSchedule: (List<ScheduleBlock>) -> ScheduleValidationResult,
     onSave: (List<ScheduleBlock>) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var blocks by remember(initialSchedule) {
-        val initial = if (initialSchedule.isEmpty()) defaultSimpleSchedule() else initialSchedule
-        mutableStateOf(initial.sortedBy { it.startMinuteOfDay })
+    val initialDefaultLimit = remember(initialSchedule) { inferDefaultLimitMinutes(initialSchedule) }
+    var defaultLimitMinutes by remember(initialSchedule) { mutableIntStateOf(initialDefaultLimit) }
+    var customWindows by remember(initialSchedule) {
+        mutableStateOf(scheduleOverrides(initialSchedule, initialDefaultLimit))
     }
     var editingIndex by remember { mutableStateOf<Int?>(null) }
 
-    val validation = validateSchedule(blocks)
-    val isTightening = isScheduleTighteningOrEqual(initialSchedule, blocks)
-    val canSave = validation.isValid && (!isCommitmentLockActive || isTightening)
+    val conflictMessage = scheduleOverrideConflictMessage(customWindows)
+    val candidateSchedule = buildScheduleFromDefault(defaultLimitMinutes, customWindows)
+    val isTightening = isScheduleTighteningOrEqual(initialSchedule, candidateSchedule)
+    val canSave = conflictMessage == null && (!isCommitmentLockActive || isTightening)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1012,7 +1046,7 @@ private fun ScheduleEditorDialog(
                     )
                 )
                 Text(
-                    text = "Configure 24-hour hourly limits and allowances",
+                    text = "Set a simple default, then add exceptions only when needed",
                     style = DesignTokens.Typography.bodySmall().copy(
                         color = DesignTokens.Palette.GrayMuted,
                         fontSize = 12.sp
@@ -1025,157 +1059,93 @@ private fun ScheduleEditorDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Preset Selector
+                Text(
+                    "DEFAULT LIMIT",
+                    style = DesignTokens.Typography.caption().copy(
+                        color = DesignTokens.Palette.GrayMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                )
+                com.hourlock.app.ui.components.LimitSelector(
+                    limitMinutes = defaultLimitMinutes,
+                    onLimitMinutesChanged = { defaultLimitMinutes = it }
+                )
+
+                HorizontalDivider(color = DesignTokens.Palette.DarkBorderSubtle, thickness = 0.5.dp)
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IntervalChip(label = "Simple (24h)", selected = blocks == defaultSimpleSchedule()) {
-                        blocks = defaultSimpleSchedule()
-                    }
-                    IntervalChip(label = "Work Focus", selected = blocks == workFocusPreset()) {
-                        blocks = workFocusPreset()
-                    }
-                    IntervalChip(label = "Weekend", selected = blocks == weekendPreset()) {
-                        blocks = weekendPreset()
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Custom Windows",
+                            style = DesignTokens.Typography.bodyMedium().copy(
+                                color = DesignTokens.Palette.PureWhite,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        )
+                        Text(
+                            "Everything else keeps the default automatically",
+                            style = DesignTokens.Typography.bodySmall().copy(
+                                color = DesignTokens.Palette.GrayMuted,
+                                fontSize = 11.sp
+                            )
+                        )
                     }
                 }
 
-                if (blocks.isEmpty()) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        shape = DesignTokens.Shapes.Card,
-                        color = DesignTokens.Palette.DarkElevated,
-                        border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                "No Schedule Blocks",
-                                style = DesignTokens.Typography.subtitle().copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = DesignTokens.Palette.PureWhite
-                                )
-                            )
-                            Text(
-                                "Tap below to add a 24-hour block or pick a preset.",
-                                style = DesignTokens.Typography.bodySmall().copy(
-                                    color = DesignTokens.Palette.GraySecondary,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            )
-                        }
-                    }
+                if (customWindows.isEmpty()) {
+                    Text(
+                        "No custom windows. The default limit applies all day.",
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.GraySecondary,
+                            fontSize = 12.sp
+                        )
+                    )
                 } else {
                     LazyColumn(
-                        modifier = Modifier.height((blocks.size * 64).coerceIn(120, 240).dp),
+                        modifier = Modifier.height((customWindows.size * 58).coerceIn(64, 190).dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(blocks.size) { index ->
-                            val block = blocks[index]
-                            val durationText = formatBlockDuration(block.startMinuteOfDay, block.endMinuteOfDay)
-                            val ruleText = when (block.ruleType) {
-                                ScheduleRuleType.HOURLY_QUOTA -> if (block.limitMinutes == 0) "Locked" else "${block.limitMinutes} min/h"
-                                ScheduleRuleType.FLAT_ALLOWANCE -> if (block.limitMinutes == 0) "Locked" else "${block.limitMinutes} min flat"
-                            }
-
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(DesignTokens.Shapes.Button)
-                                    .clickable { editingIndex = index },
-                                shape = DesignTokens.Shapes.Button,
-                                color = DesignTokens.Palette.DarkElevated,
-                                border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorderSubtle)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Text(
-                                                text = "${formatMinuteOfDay(block.startMinuteOfDay)} – ${formatMinuteOfDay(block.endMinuteOfDay)}",
-                                                style = DesignTokens.Typography.bodyMedium().copy(
-                                                    color = DesignTokens.Palette.PureWhite,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 13.sp
-                                                )
-                                            )
-                                            Surface(
-                                                shape = DesignTokens.Shapes.Badge,
-                                                color = DesignTokens.Palette.DarkCard
-                                            ) {
-                                                Text(
-                                                    text = durationText,
-                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                                                    style = DesignTokens.Typography.caption().copy(
-                                                        color = DesignTokens.Palette.GrayMuted,
-                                                        fontSize = 9.sp
-                                                    )
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            text = ruleText,
-                                            style = DesignTokens.Typography.bodySmall().copy(
-                                                color = if (block.limitMinutes == 0) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.GraySecondary,
-                                                fontSize = 11.sp
-                                            )
-                                        )
-                                    }
-
-                                    if (blocks.size > 1) {
-                                        IconButton(
-                                            onClick = {
-                                                blocks = deleteScheduleBlock(blocks, index)
-                                            },
-                                            enabled = !isCommitmentLockActive,
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Filled.DeleteOutline,
-                                                contentDescription = "Delete block",
-                                                tint = if (isCommitmentLockActive) DesignTokens.Palette.DarkBorderSubtle else DesignTokens.Palette.GrayMuted,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                        items(customWindows.size) { index ->
+                            CustomWindowRow(
+                                window = customWindows[index],
+                                onEdit = { editingIndex = index },
+                                onDelete = {
+                                    customWindows = customWindows.filterIndexed { i, _ -> i != index }
+                                },
+                                deleteEnabled = !isCommitmentLockActive
+                            )
                         }
                     }
                 }
 
-                // Add / Split Block Button
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(DesignTokens.Shapes.Button)
                         .clickable {
-                            if (blocks.isEmpty()) {
-                                blocks = defaultSimpleSchedule()
-                            } else {
-                                blocks = splitScheduleBlock(blocks, blocks.lastIndex)
-                            }
+                            val start = nextSuggestedOverrideStart(customWindows)
+                            val end = (start + 60).coerceAtMost(24 * 60)
+                            customWindows = customWindows + ScheduleOverride(
+                                startMinuteOfDay = start,
+                                endMinuteOfDay = end,
+                                ruleType = ScheduleRuleType.HOURLY_QUOTA,
+                                limitMinutes = 0
+                            )
+                            editingIndex = customWindows.lastIndex
                         },
                     shape = DesignTokens.Shapes.Button,
                     color = DesignTokens.Palette.PureWhite,
                     contentColor = DesignTokens.Palette.PureBlack
                 ) {
                     Text(
-                        text = if (blocks.isEmpty()) "+ Add 24h Schedule" else "+ Split / Add Block",
+                        text = "+ Add Custom Window",
                         modifier = Modifier.padding(vertical = 10.dp),
                         style = DesignTokens.Typography.caption().copy(
                             color = DesignTokens.Palette.PureBlack,
@@ -1187,9 +1157,9 @@ private fun ScheduleEditorDialog(
                     )
                 }
 
-                if (!validation.isValid) {
+                if (conflictMessage != null) {
                     Text(
-                        text = validation.errorMessage ?: "Invalid schedule",
+                        text = conflictMessage,
                         style = DesignTokens.Typography.bodySmall().copy(
                             color = DesignTokens.Palette.WarningAccent,
                             fontSize = 11.sp
@@ -1207,8 +1177,8 @@ private fun ScheduleEditorDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(blocks) }, enabled = canSave) {
-                Text("Save Schedule", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+            TextButton(onClick = { onSave(candidateSchedule) }, enabled = canSave) {
+                Text("Save", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1219,15 +1189,15 @@ private fun ScheduleEditorDialog(
     )
 
     editingIndex?.let { index ->
-        val block = blocks.getOrNull(index)
-        if (block != null) {
-            EditBlockDialog(
-                blockIndex = index,
-                totalBlocks = blocks.size,
-                allBlocks = blocks,
+        val window = customWindows.getOrNull(index)
+        if (window != null) {
+            EditCustomWindowDialog(
+                window = window,
                 onDismiss = { editingIndex = null },
-                onSave = { updatedBlock, updatedBlocks ->
-                    blocks = updatedBlocks
+                onSave = { updated ->
+                    customWindows = customWindows.mapIndexed { i, existing ->
+                        if (i == index) updated else existing
+                    }
                     editingIndex = null
                 }
             )
@@ -1236,73 +1206,99 @@ private fun ScheduleEditorDialog(
 }
 
 @Composable
-private fun EditBlockDialog(
-    blockIndex: Int,
-    totalBlocks: Int,
-    allBlocks: List<ScheduleBlock>,
-    onSave: (ScheduleBlock, List<ScheduleBlock>) -> Unit,
+private fun CustomWindowRow(
+    window: ScheduleOverride,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    deleteEnabled: Boolean
+) {
+    val ruleText = when (window.ruleType) {
+        ScheduleRuleType.HOURLY_QUOTA -> if (window.limitMinutes == 0) "Locked" else "${window.limitMinutes} min/hour"
+        ScheduleRuleType.FLAT_ALLOWANCE -> if (window.limitMinutes == 0) "Locked" else "${window.limitMinutes} min total"
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(DesignTokens.Shapes.Button)
+            .clickable { onEdit() },
+        shape = DesignTokens.Shapes.Button,
+        color = DesignTokens.Palette.DarkElevated,
+        border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorderSubtle)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "${formatMinuteOfDay(window.startMinuteOfDay)} - ${formatMinuteOfDay(window.endMinuteOfDay)}",
+                    style = DesignTokens.Typography.bodyMedium().copy(
+                        color = DesignTokens.Palette.PureWhite,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                )
+                Text(
+                    ruleText,
+                    style = DesignTokens.Typography.bodySmall().copy(
+                        color = if (window.limitMinutes == 0) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.GraySecondary,
+                        fontSize = 11.sp
+                    )
+                )
+            }
+
+            IconButton(
+                onClick = onDelete,
+                enabled = deleteEnabled,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Filled.DeleteOutline,
+                    contentDescription = "Delete custom window",
+                    tint = if (deleteEnabled) DesignTokens.Palette.GrayMuted else DesignTokens.Palette.DarkBorderSubtle,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditCustomWindowDialog(
+    window: ScheduleOverride,
+    onSave: (ScheduleOverride) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val currentBlock = allBlocks[blockIndex]
-    var ruleType by remember { mutableStateOf(currentBlock.ruleType) }
-    var limitMinutes by remember { mutableIntStateOf(currentBlock.limitMinutes) }
-
-    val isFirst = blockIndex == 0
-    val isLast = blockIndex == allBlocks.lastIndex
-    val isSingle = totalBlocks <= 1
-
-    var startMinute by remember { mutableIntStateOf(currentBlock.startMinuteOfDay) }
-    var endMinute by remember { mutableIntStateOf(currentBlock.endMinuteOfDay) }
-    var activeTimeTab by remember { mutableIntStateOf(if (!isLast) 1 else 0) } // 0 = start, 1 = end
-
-    val minStart = if (isFirst) 0 else (allBlocks[blockIndex - 1].startMinuteOfDay + 5)
-    val maxStart = endMinute - 5
-    val minEnd = startMinute + 5
-    val maxEnd = if (isLast) 24 * 60 else (allBlocks[blockIndex + 1].endMinuteOfDay - 5)
+    var startMinute by remember(window) { mutableIntStateOf(window.startMinuteOfDay) }
+    var endMinute by remember(window) { mutableIntStateOf(window.endMinuteOfDay) }
+    var ruleType by remember(window) { mutableStateOf(window.ruleType) }
+    var limitMinutes by remember(window) { mutableIntStateOf(window.limitMinutes) }
+    var activeTimeTab by remember { mutableIntStateOf(0) }
+    val isValid = endMinute > startMinute
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DesignTokens.Palette.DarkCard,
         shape = DesignTokens.Shapes.Card,
         title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        "Block ${blockIndex + 1} of $totalBlocks",
-                        style = DesignTokens.Typography.subtitle().copy(
-                            color = DesignTokens.Palette.PureWhite,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
+            Column {
+                Text(
+                    "Custom Window",
+                    style = DesignTokens.Typography.subtitle().copy(
+                        color = DesignTokens.Palette.PureWhite,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
                     )
-                    Text(
-                        "${formatBlockDuration(startMinute, endMinute)} duration",
-                        style = DesignTokens.Typography.bodySmall().copy(
-                            color = DesignTokens.Palette.GrayMuted,
-                            fontSize = 11.sp
-                        )
+                )
+                Text(
+                    "${formatMinuteOfDay(startMinute)} - ${formatMinuteOfDay(endMinute)}",
+                    style = DesignTokens.Typography.bodySmall().copy(
+                        color = DesignTokens.Palette.GrayMuted,
+                        fontSize = 12.sp
                     )
-                }
-
-                Surface(
-                    shape = DesignTokens.Shapes.Badge,
-                    color = DesignTokens.Palette.DarkElevated,
-                    border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
-                ) {
-                    Text(
-                        "${formatMinuteOfDay(startMinute)} – ${formatMinuteOfDay(endMinute)}",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        style = DesignTokens.Typography.caption().copy(
-                            color = DesignTokens.Palette.PureWhite,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp
-                        )
-                    )
-                }
+                )
             }
         },
         text = {
@@ -1310,59 +1306,41 @@ private fun EditBlockDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Rule Type Toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Surface(
-                        shape = DesignTokens.Shapes.Chip,
-                        color = if (ruleType == ScheduleRuleType.HOURLY_QUOTA) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkElevated,
-                        border = BorderStroke(1.dp, if (ruleType == ScheduleRuleType.HOURLY_QUOTA) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorderSubtle),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(DesignTokens.Shapes.Chip)
-                            .clickable { ruleType = ScheduleRuleType.HOURLY_QUOTA }
-                    ) {
-                        Text(
-                            "Hourly Quota",
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            style = DesignTokens.Typography.caption().copy(
-                                color = if (ruleType == ScheduleRuleType.HOURLY_QUOTA) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            ),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-
-                    Surface(
-                        shape = DesignTokens.Shapes.Chip,
-                        color = if (ruleType == ScheduleRuleType.FLAT_ALLOWANCE) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkElevated,
-                        border = BorderStroke(1.dp, if (ruleType == ScheduleRuleType.FLAT_ALLOWANCE) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorderSubtle),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(DesignTokens.Shapes.Chip)
-                            .clickable { ruleType = ScheduleRuleType.FLAT_ALLOWANCE }
-                    ) {
-                        Text(
-                            "Flat Allowance",
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            style = DesignTokens.Typography.caption().copy(
-                                color = if (ruleType == ScheduleRuleType.FLAT_ALLOWANCE) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            ),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
+                    IntervalChip(label = "Start", selected = activeTimeTab == 0) { activeTimeTab = 0 }
+                    IntervalChip(label = "End", selected = activeTimeTab == 1) { activeTimeTab = 1 }
                 }
 
-                // Limit Selector
+                if (activeTimeTab == 0) {
+                    com.hourlock.app.ui.components.TimeWheelPicker(
+                        minuteOfDay = startMinute,
+                        onMinuteOfDayChanged = { selected ->
+                            startMinute = selected.coerceAtMost(23 * 60 + 55)
+                            if (endMinute <= startMinute) {
+                                endMinute = (startMinute + 60).coerceAtMost(24 * 60)
+                            }
+                        },
+                        minMinute = 0,
+                        maxMinute = (endMinute - 5).coerceAtLeast(0),
+                        allow24HourEnd = false
+                    )
+                } else {
+                    com.hourlock.app.ui.components.TimeWheelPicker(
+                        minuteOfDay = endMinute,
+                        onMinuteOfDayChanged = { selected ->
+                            endMinute = selected.coerceAtLeast(startMinute + 5).coerceAtMost(24 * 60)
+                        },
+                        minMinute = (startMinute + 5).coerceAtMost(24 * 60),
+                        maxMinute = 24 * 60,
+                        allow24HourEnd = true
+                    )
+                }
+
                 Text(
-                    "ALLOWED USAGE LIMIT",
+                    "LIMIT FOR THIS WINDOW",
                     style = DesignTokens.Typography.caption().copy(
                         color = DesignTokens.Palette.GrayMuted,
                         fontSize = 10.sp,
@@ -1370,119 +1348,43 @@ private fun EditBlockDialog(
                         letterSpacing = 1.sp
                     )
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IntervalChip(label = "Per hour", selected = ruleType == ScheduleRuleType.HOURLY_QUOTA) {
+                        ruleType = ScheduleRuleType.HOURLY_QUOTA
+                    }
+                    IntervalChip(label = "Total", selected = ruleType == ScheduleRuleType.FLAT_ALLOWANCE) {
+                        ruleType = ScheduleRuleType.FLAT_ALLOWANCE
+                    }
+                }
                 com.hourlock.app.ui.components.LimitSelector(
                     limitMinutes = limitMinutes,
                     onLimitMinutesChanged = { limitMinutes = it }
                 )
 
-                // Time Boundary Adjuster
-                if (!isSingle) {
+                if (!isValid) {
                     Text(
-                        "ADJUST TIME BOUNDARY",
-                        style = DesignTokens.Typography.caption().copy(
-                            color = DesignTokens.Palette.GrayMuted,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
+                        "End time must be after start time.",
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.WarningAccent,
+                            fontSize = 11.sp
                         )
                     )
-
-                    // Start/End selection tabs
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        if (!isFirst) {
-                            Surface(
-                                shape = DesignTokens.Shapes.Badge,
-                                color = if (activeTimeTab == 0) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkElevated,
-                                border = BorderStroke(1.dp, if (activeTimeTab == 0) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorderSubtle),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(DesignTokens.Shapes.Badge)
-                                    .clickable { activeTimeTab = 0 }
-                            ) {
-                                Text(
-                                    "Start: ${formatMinuteOfDay(startMinute)}",
-                                    modifier = Modifier.padding(vertical = 6.dp),
-                                    style = DesignTokens.Typography.caption().copy(
-                                        color = if (activeTimeTab == 0) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                    ),
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-                        }
-
-                        if (!isLast) {
-                            Surface(
-                                shape = DesignTokens.Shapes.Badge,
-                                color = if (activeTimeTab == 1) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkElevated,
-                                border = BorderStroke(1.dp, if (activeTimeTab == 1) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorderSubtle),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(DesignTokens.Shapes.Badge)
-                                    .clickable { activeTimeTab = 1 }
-                            ) {
-                                Text(
-                                    "End: ${formatMinuteOfDay(endMinute)}",
-                                    modifier = Modifier.padding(vertical = 6.dp),
-                                    style = DesignTokens.Typography.caption().copy(
-                                        color = if (activeTimeTab == 1) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                    ),
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-
-                    if (activeTimeTab == 0 && !isFirst) {
-                        com.hourlock.app.ui.components.TimeWheelPicker(
-                            minuteOfDay = startMinute,
-                            onMinuteOfDayChanged = { startMinute = it },
-                            minMinute = minStart,
-                            maxMinute = maxStart,
-                            allow24HourEnd = false
-                        )
-                    } else if (activeTimeTab == 1 && !isLast) {
-                        com.hourlock.app.ui.components.TimeWheelPicker(
-                            minuteOfDay = endMinute,
-                            onMinuteOfDayChanged = { endMinute = it },
-                            minMinute = minEnd,
-                            maxMinute = maxEnd,
-                            allow24HourEnd = isLast
-                        )
-                    }
                 }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    val updatedCurrent = currentBlock.copy(
-                        startMinuteOfDay = startMinute,
-                        endMinuteOfDay = endMinute,
-                        ruleType = ruleType,
-                        limitMinutes = limitMinutes
+                    onSave(
+                        ScheduleOverride(
+                            startMinuteOfDay = startMinute,
+                            endMinuteOfDay = endMinute,
+                            ruleType = ruleType,
+                            limitMinutes = limitMinutes
+                        )
                     )
-
-                    // Synchronize adjacent blocks to ensure ZERO gaps
-                    val updatedBlocks = allBlocks.mapIndexed { i, block ->
-                        when (i) {
-                            blockIndex -> updatedCurrent
-                            blockIndex - 1 -> block.copy(endMinuteOfDay = startMinute)
-                            blockIndex + 1 -> block.copy(startMinuteOfDay = endMinute)
-                            else -> block
-                        }
-                    }
-
-                    onSave(updatedCurrent, updatedBlocks)
-                }
+                },
+                enabled = isValid
             ) {
                 Text("Apply", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
             }
@@ -1493,6 +1395,11 @@ private fun EditBlockDialog(
             }
         }
     )
+}
+
+private fun nextSuggestedOverrideStart(windows: List<ScheduleOverride>): Int {
+    val latestEnd = windows.maxOfOrNull { it.endMinuteOfDay } ?: (9 * 60)
+    return latestEnd.coerceAtMost(23 * 60)
 }
 
 @Composable
@@ -1610,4 +1517,3 @@ private fun scheduleStrictnessByMinute(blocks: List<ScheduleBlock>): FloatArray 
     }
     return result
 }
-

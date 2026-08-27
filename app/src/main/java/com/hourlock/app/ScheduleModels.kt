@@ -18,6 +18,13 @@ data class ScheduleBlock(
     val limitMinutes: Int
 )
 
+data class ScheduleOverride(
+    val startMinuteOfDay: Int,
+    val endMinuteOfDay: Int,
+    val ruleType: ScheduleRuleType,
+    val limitMinutes: Int
+)
+
 data class ScheduleValidationResult(
     val isValid: Boolean,
     val errorMessage: String? = null
@@ -68,6 +75,121 @@ fun defaultSimpleSchedule(limitMinutes: Int = DEFAULT_LIMIT_MINUTES): List<Sched
             limitMinutes = limitMinutes.coerceIn(0, 240)
         )
     )
+}
+
+fun inferDefaultLimitMinutes(blocks: List<ScheduleBlock>): Int {
+    if (blocks.isEmpty()) return DEFAULT_LIMIT_MINUTES
+
+    return blocks
+        .filter { it.ruleType == ScheduleRuleType.HOURLY_QUOTA }
+        .groupBy { it.limitMinutes.coerceIn(0, 240) }
+        .maxByOrNull { (_, groupedBlocks) ->
+            groupedBlocks.sumOf { block -> block.endMinuteOfDay - block.startMinuteOfDay }
+        }
+        ?.key
+        ?: DEFAULT_LIMIT_MINUTES
+}
+
+fun scheduleOverrides(
+    blocks: List<ScheduleBlock>,
+    defaultLimitMinutes: Int = inferDefaultLimitMinutes(blocks)
+): List<ScheduleOverride> {
+    val normalizedDefault = defaultLimitMinutes.coerceIn(0, 240)
+    return blocks
+        .sortedBy { it.startMinuteOfDay }
+        .filterNot { block ->
+            block.ruleType == ScheduleRuleType.HOURLY_QUOTA &&
+                block.limitMinutes.coerceIn(0, 240) == normalizedDefault
+        }
+        .map { block ->
+            ScheduleOverride(
+                startMinuteOfDay = block.startMinuteOfDay,
+                endMinuteOfDay = block.endMinuteOfDay,
+                ruleType = block.ruleType,
+                limitMinutes = block.limitMinutes.coerceIn(0, 240)
+            )
+        }
+}
+
+fun buildScheduleFromDefault(
+    defaultLimitMinutes: Int = DEFAULT_LIMIT_MINUTES,
+    overrides: List<ScheduleOverride>
+): List<ScheduleBlock> {
+    val defaultLimit = defaultLimitMinutes.coerceIn(0, 240)
+    val cleanOverrides = overrides
+        .mapNotNull { override ->
+            val start = override.startMinuteOfDay.coerceIn(0, 24 * 60)
+            val end = override.endMinuteOfDay.coerceIn(0, 24 * 60)
+            if (end <= start) {
+                null
+            } else {
+                override.copy(
+                    startMinuteOfDay = start,
+                    endMinuteOfDay = end,
+                    limitMinutes = override.limitMinutes.coerceIn(0, 240)
+                )
+            }
+        }
+        .sortedWith(compareBy<ScheduleOverride> { it.startMinuteOfDay }.thenBy { it.endMinuteOfDay })
+
+    val result = mutableListOf<ScheduleBlock>()
+    var cursor = 0
+    for (override in cleanOverrides) {
+        if (override.startMinuteOfDay < cursor) continue
+
+        if (override.startMinuteOfDay > cursor) {
+            result += ScheduleBlock(
+                startMinuteOfDay = cursor,
+                endMinuteOfDay = override.startMinuteOfDay,
+                ruleType = ScheduleRuleType.HOURLY_QUOTA,
+                limitMinutes = defaultLimit
+            )
+        }
+
+        result += ScheduleBlock(
+            startMinuteOfDay = override.startMinuteOfDay,
+            endMinuteOfDay = override.endMinuteOfDay,
+            ruleType = override.ruleType,
+            limitMinutes = override.limitMinutes
+        )
+        cursor = override.endMinuteOfDay
+    }
+
+    if (cursor < 24 * 60) {
+        result += ScheduleBlock(
+            startMinuteOfDay = cursor,
+            endMinuteOfDay = 24 * 60,
+            ruleType = ScheduleRuleType.HOURLY_QUOTA,
+            limitMinutes = defaultLimit
+        )
+    }
+
+    return result.ifEmpty { defaultSimpleSchedule(defaultLimit) }
+}
+
+fun scheduleOverrideConflictMessage(overrides: List<ScheduleOverride>): String? {
+    val sorted = overrides
+        .map {
+            it.copy(
+                startMinuteOfDay = it.startMinuteOfDay.coerceIn(0, 24 * 60),
+                endMinuteOfDay = it.endMinuteOfDay.coerceIn(0, 24 * 60)
+            )
+        }
+        .sortedBy { it.startMinuteOfDay }
+
+    for (override in sorted) {
+        if (override.endMinuteOfDay <= override.startMinuteOfDay) {
+            return "Each custom window needs an end time after its start time."
+        }
+    }
+
+    for (i in 1 until sorted.size) {
+        if (sorted[i].startMinuteOfDay < sorted[i - 1].endMinuteOfDay) {
+            return "Custom windows cannot overlap. The rest of the day is filled automatically."
+        }
+    }
+
+    return null
 }
 
 fun workFocusPreset(): List<ScheduleBlock> {
@@ -198,4 +320,3 @@ fun formatLockUntil(untilMillis: Long): String {
     val sdf = SimpleDateFormat("EEE h:mm a", Locale.getDefault())
     return sdf.format(Date(untilMillis))
 }
-

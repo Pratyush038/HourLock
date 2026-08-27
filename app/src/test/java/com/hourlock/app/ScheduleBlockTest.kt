@@ -177,6 +177,68 @@ class ScheduleBlockTest {
     }
 
     @Test
+    fun testBuildScheduleFromDefaultFillsUnspecifiedTime() {
+        val schedule = buildScheduleFromDefault(
+            defaultLimitMinutes = 10,
+            overrides = listOf(
+                ScheduleOverride(9 * 60, 17 * 60, ScheduleRuleType.HOURLY_QUOTA, 0)
+            )
+        )
+
+        assertEquals(3, schedule.size)
+        assertEquals(ScheduleBlock(0, 9 * 60, ScheduleRuleType.HOURLY_QUOTA, 10), schedule[0])
+        assertEquals(ScheduleBlock(9 * 60, 17 * 60, ScheduleRuleType.HOURLY_QUOTA, 0), schedule[1])
+        assertEquals(ScheduleBlock(17 * 60, 24 * 60, ScheduleRuleType.HOURLY_QUOTA, 10), schedule[2])
+        assertTrue(validate(schedule))
+    }
+
+    @Test
+    fun testBuildScheduleFromDefaultSupportsMultipleExceptionWindows() {
+        val schedule = buildScheduleFromDefault(
+            defaultLimitMinutes = 10,
+            overrides = listOf(
+                ScheduleOverride(22 * 60, 24 * 60, ScheduleRuleType.HOURLY_QUOTA, 0),
+                ScheduleOverride(12 * 60, 13 * 60, ScheduleRuleType.FLAT_ALLOWANCE, 30)
+            )
+        )
+
+        assertEquals(4, schedule.size)
+        assertEquals(ScheduleBlock(0, 12 * 60, ScheduleRuleType.HOURLY_QUOTA, 10), schedule[0])
+        assertEquals(ScheduleBlock(12 * 60, 13 * 60, ScheduleRuleType.FLAT_ALLOWANCE, 30), schedule[1])
+        assertEquals(ScheduleBlock(13 * 60, 22 * 60, ScheduleRuleType.HOURLY_QUOTA, 10), schedule[2])
+        assertEquals(ScheduleBlock(22 * 60, 24 * 60, ScheduleRuleType.HOURLY_QUOTA, 0), schedule[3])
+        assertTrue(validate(schedule))
+    }
+
+    @Test
+    fun testScheduleOverrideConflictMessageAllowsGapsButRejectsOverlaps() {
+        val gaps = listOf(
+            ScheduleOverride(8 * 60, 9 * 60, ScheduleRuleType.HOURLY_QUOTA, 0),
+            ScheduleOverride(17 * 60, 18 * 60, ScheduleRuleType.HOURLY_QUOTA, 5)
+        )
+        val overlaps = listOf(
+            ScheduleOverride(8 * 60, 10 * 60, ScheduleRuleType.HOURLY_QUOTA, 0),
+            ScheduleOverride(9 * 60, 11 * 60, ScheduleRuleType.HOURLY_QUOTA, 5)
+        )
+
+        assertEquals(null, scheduleOverrideConflictMessage(gaps))
+        assertTrue(scheduleOverrideConflictMessage(overlaps)?.contains("overlap") == true)
+    }
+
+    @Test
+    fun testInferDefaultLimitUsesMostCoveredHourlyLimit() {
+        val schedule = buildScheduleFromDefault(
+            defaultLimitMinutes = 10,
+            overrides = listOf(
+                ScheduleOverride(9 * 60, 17 * 60, ScheduleRuleType.HOURLY_QUOTA, 0)
+            )
+        )
+
+        assertEquals(10, inferDefaultLimitMinutes(schedule))
+        assertEquals(1, scheduleOverrides(schedule, defaultLimitMinutes = 10).size)
+    }
+
+    @Test
     fun testFormatHelpersHandleEdges() {
         assertEquals("00:00", formatMinuteOfDay24H(-1))
         assertEquals("24:00", formatMinuteOfDay24H(24 * 60 + 1))
