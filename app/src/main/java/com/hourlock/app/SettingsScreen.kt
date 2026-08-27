@@ -853,7 +853,7 @@ private fun MonitoredAppBudgetRowCard(
                     limitMinutes = window.limitMinutes
                 )
                 Text(
-                    text = formatBlockLabel(block),
+                    text = formatBlockLabel(block) + if (window.endMinuteOfDay < window.startMinuteOfDay) " (next day)" else "",
                     style = DesignTokens.Typography.bodySmall().copy(
                         color = DesignTokens.Palette.GraySecondary,
                         fontSize = 12.sp
@@ -1241,6 +1241,15 @@ private fun CustomWindowRow(
                         fontSize = 13.sp
                     )
                 )
+                if (window.endMinuteOfDay < window.startMinuteOfDay) {
+                    Text(
+                        "Next day",
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.GraySecondary,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
                 Text(
                     ruleText,
                     style = DesignTokens.Typography.bodySmall().copy(
@@ -1277,6 +1286,12 @@ private fun EditCustomWindowDialog(
     var endMinute by remember(window) { mutableIntStateOf(window.endMinuteOfDay) }
     var ruleType by remember(window) { mutableStateOf(window.ruleType) }
     var limitMinutes by remember(window) { mutableIntStateOf(window.limitMinutes) }
+    var showRangeError by remember(window) { mutableStateOf(false) }
+    val rangeError = if (endMinute == startMinute) {
+        "Choose different start and end times. An earlier end time means next day."
+    } else {
+        null
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1299,6 +1314,15 @@ private fun EditCustomWindowDialog(
                         fontSize = 12.sp
                     )
                 )
+                if (endMinute < startMinute) {
+                    Text(
+                        "Ends the next day",
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.GraySecondary,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
             }
         },
         text = {
@@ -1327,8 +1351,6 @@ private fun EditCustomWindowDialog(
                             showNativeTimePicker(
                                 context = context,
                                 minuteOfDay = startMinute,
-                                minMinute = 0,
-                                maxMinute = (endMinute - 5).coerceAtLeast(0),
                                 onSelected = { selected -> startMinute = selected }
                             )
                         }
@@ -1341,8 +1363,6 @@ private fun EditCustomWindowDialog(
                             showNativeTimePicker(
                                 context = context,
                                 minuteOfDay = endMinute,
-                                minMinute = (startMinute + 5).coerceAtMost(24 * 60),
-                                maxMinute = 24 * 60,
                                 allowMidnight = true,
                                 onSelected = { selected -> endMinute = selected }
                             )
@@ -1372,21 +1392,35 @@ private fun EditCustomWindowDialog(
                     onLimitMinutesChanged = { limitMinutes = it }
                 )
 
+                if (showRangeError && rangeError != null) {
+                    Text(
+                        rangeError,
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.WarningAccent,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
+
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(
-                        ScheduleOverride(
-                            startMinuteOfDay = startMinute,
-                            endMinuteOfDay = endMinute,
-                            ruleType = ruleType,
-                            limitMinutes = limitMinutes
+                    if (rangeError != null) {
+                        showRangeError = true
+                    } else {
+                        onSave(
+                            ScheduleOverride(
+                                startMinuteOfDay = startMinute,
+                                endMinuteOfDay = endMinute,
+                                ruleType = ruleType,
+                                limitMinutes = limitMinutes
+                            )
                         )
-                    )
+                    }
                 },
-                enabled = endMinute > startMinute
+                enabled = true
             ) {
                 Text("Apply", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
             }
@@ -1441,14 +1475,11 @@ private fun TimeChoiceButton(
 private fun showNativeTimePicker(
     context: Context,
     minuteOfDay: Int,
-    minMinute: Int,
-    maxMinute: Int,
     allowMidnight: Boolean = false,
     onSelected: (Int) -> Unit
 ) {
-    val pickerMinute = minuteOfDay
-        .coerceIn(minMinute, maxMinute)
-        .let { if (allowMidnight && it == 24 * 60) 0 else it }
+    val pickerMinute = minuteOfDay.coerceIn(0, 24 * 60)
+        .let { if (it == 24 * 60) 0 else it }
     TimePickerDialog(
         context,
         { _, hour, minute ->
@@ -1456,7 +1487,7 @@ private fun showNativeTimePicker(
             val selected = if (allowMidnight && rawSelected == 0) {
                 24 * 60
             } else {
-                rawSelected.coerceIn(minMinute, maxMinute)
+                rawSelected
             }
             onSelected(selected)
         },

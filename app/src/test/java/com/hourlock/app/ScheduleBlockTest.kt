@@ -211,6 +211,26 @@ class ScheduleBlockTest {
     }
 
     @Test
+    fun testBuildScheduleFromDefaultSupportsOvernightWindow() {
+        val schedule = buildScheduleFromDefault(
+            defaultLimitMinutes = 10,
+            overrides = listOf(
+                ScheduleOverride(21 * 60 + 30, 9 * 60 + 30, ScheduleRuleType.HOURLY_QUOTA, 0)
+            )
+        )
+
+        assertEquals(3, schedule.size)
+        assertEquals(ScheduleBlock(0, 9 * 60 + 30, ScheduleRuleType.HOURLY_QUOTA, 0), schedule[0])
+        assertEquals(ScheduleBlock(9 * 60 + 30, 21 * 60 + 30, ScheduleRuleType.HOURLY_QUOTA, 10), schedule[1])
+        assertEquals(ScheduleBlock(21 * 60 + 30, 24 * 60, ScheduleRuleType.HOURLY_QUOTA, 0), schedule[2])
+        assertTrue(validate(schedule))
+        assertEquals(
+            listOf(ScheduleOverride(21 * 60 + 30, 9 * 60 + 30, ScheduleRuleType.HOURLY_QUOTA, 0)),
+            scheduleOverrides(schedule, defaultLimitMinutes = 10)
+        )
+    }
+
+    @Test
     fun testScheduleOverrideConflictMessageAllowsGapsButRejectsOverlaps() {
         val gaps = listOf(
             ScheduleOverride(8 * 60, 9 * 60, ScheduleRuleType.HOURLY_QUOTA, 0),
@@ -223,6 +243,12 @@ class ScheduleBlockTest {
 
         assertEquals(null, scheduleOverrideConflictMessage(gaps))
         assertTrue(scheduleOverrideConflictMessage(overlaps)?.contains("overlap") == true)
+        assertEquals(null, scheduleOverrideConflictMessage(listOf(
+            ScheduleOverride(21 * 60, 9 * 60, ScheduleRuleType.HOURLY_QUOTA, 0)
+        )))
+        assertTrue(scheduleOverrideConflictMessage(listOf(
+            ScheduleOverride(9 * 60, 9 * 60, ScheduleRuleType.HOURLY_QUOTA, 0)
+        ))?.contains("different") == true)
     }
 
     @Test
