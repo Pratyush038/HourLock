@@ -537,6 +537,7 @@ class PrefsRepository(private val context: Context) {
      * in the device's local timezone (e.g. IST GMT+5:30) to now.
      * Accurately tracks app switches, screen lock / off transitions, and pauses.
      */
+    @Suppress("DEPRECATION")
     suspend fun getTodayTotalSeconds(pkg: String, context: Context): Long = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager
@@ -620,6 +621,7 @@ class PrefsRepository(private val context: Context) {
     /**
      * Exact total foreground usage today in seconds across ALL [pkgs] combined.
      */
+    @Suppress("DEPRECATION")
     suspend fun getTodayTotalSecondsAll(pkgs: Set<String>, context: Context): Long = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager

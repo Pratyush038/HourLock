@@ -51,6 +51,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -986,7 +987,10 @@ private fun ScheduleEditorDialog(
     onSave: (List<ScheduleBlock>) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var blocks by remember(initialSchedule) { mutableStateOf(initialSchedule.sortedBy { it.startMinuteOfDay }) }
+    var blocks by remember(initialSchedule) {
+        val initial = if (initialSchedule.isEmpty()) defaultSimpleSchedule() else initialSchedule
+        mutableStateOf(initial.sortedBy { it.startMinuteOfDay })
+    }
     var editingIndex by remember { mutableStateOf<Int?>(null) }
 
     val validation = validateSchedule(blocks)
@@ -998,92 +1002,186 @@ private fun ScheduleEditorDialog(
         containerColor = DesignTokens.Palette.DarkCard,
         shape = DesignTokens.Shapes.Card,
         title = {
-            Text(
-                text = "$appLabel Schedule",
-                style = DesignTokens.Typography.title().copy(
-                    color = DesignTokens.Palette.PureWhite,
-                    fontWeight = FontWeight.Bold
+            Column {
+                Text(
+                    text = "$appLabel Schedule",
+                    style = DesignTokens.Typography.title().copy(
+                        color = DesignTokens.Palette.PureWhite,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
                 )
-            )
+                Text(
+                    text = "Configure 24-hour hourly limits and allowances",
+                    style = DesignTokens.Typography.bodySmall().copy(
+                        color = DesignTokens.Palette.GrayMuted,
+                        fontSize = 12.sp
+                    )
+                )
+            }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IntervalChip(label = "Simple", selected = false) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Preset Selector
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    IntervalChip(label = "Simple (24h)", selected = blocks == defaultSimpleSchedule()) {
                         blocks = defaultSimpleSchedule()
                     }
-                    IntervalChip(label = "Work Focus", selected = false) {
+                    IntervalChip(label = "Work Focus", selected = blocks == workFocusPreset()) {
                         blocks = workFocusPreset()
                     }
-                    IntervalChip(label = "Weekend", selected = false) {
+                    IntervalChip(label = "Weekend", selected = blocks == weekendPreset()) {
                         blocks = weekendPreset()
                     }
                 }
 
-                blocks.forEachIndexed { index, block ->
-                    Row(
+                if (blocks.isEmpty()) {
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(DesignTokens.Shapes.Button)
-                            .clickable { editingIndex = index }
-                            .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(vertical = 12.dp),
+                        shape = DesignTokens.Shapes.Card,
+                        color = DesignTokens.Palette.DarkElevated,
+                        border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
                     ) {
-                        Text(
-                            text = formatBlockLabel(block),
-                            style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.PureWhite)
-                        )
-
-                        IconButton(
-                            onClick = {
-                                blocks = blocks.filterIndexed { i, _ -> i != index }
-                            },
-                            enabled = !isCommitmentLockActive
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                Icons.Filled.DeleteOutline,
-                                contentDescription = "Delete block",
-                                tint = if (isCommitmentLockActive) DesignTokens.Palette.DarkBorderSubtle else DesignTokens.Palette.GrayMuted
+                            Text(
+                                "No Schedule Blocks",
+                                style = DesignTokens.Typography.subtitle().copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = DesignTokens.Palette.PureWhite
+                                )
                             )
+                            Text(
+                                "Tap below to add a 24-hour block or pick a preset.",
+                                style = DesignTokens.Typography.bodySmall().copy(
+                                    color = DesignTokens.Palette.GraySecondary,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.height((blocks.size * 64).coerceIn(120, 240).dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(blocks.size) { index ->
+                            val block = blocks[index]
+                            val durationText = formatBlockDuration(block.startMinuteOfDay, block.endMinuteOfDay)
+                            val ruleText = when (block.ruleType) {
+                                ScheduleRuleType.HOURLY_QUOTA -> if (block.limitMinutes == 0) "Locked" else "${block.limitMinutes} min/h"
+                                ScheduleRuleType.FLAT_ALLOWANCE -> if (block.limitMinutes == 0) "Locked" else "${block.limitMinutes} min flat"
+                            }
+
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(DesignTokens.Shapes.Button)
+                                    .clickable { editingIndex = index },
+                                shape = DesignTokens.Shapes.Button,
+                                color = DesignTokens.Palette.DarkElevated,
+                                border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorderSubtle)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "${formatMinuteOfDay(block.startMinuteOfDay)} – ${formatMinuteOfDay(block.endMinuteOfDay)}",
+                                                style = DesignTokens.Typography.bodyMedium().copy(
+                                                    color = DesignTokens.Palette.PureWhite,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp
+                                                )
+                                            )
+                                            Surface(
+                                                shape = DesignTokens.Shapes.Badge,
+                                                color = DesignTokens.Palette.DarkCard
+                                            ) {
+                                                Text(
+                                                    text = durationText,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                                    style = DesignTokens.Typography.caption().copy(
+                                                        color = DesignTokens.Palette.GrayMuted,
+                                                        fontSize = 9.sp
+                                                    )
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = ruleText,
+                                            style = DesignTokens.Typography.bodySmall().copy(
+                                                color = if (block.limitMinutes == 0) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.GraySecondary,
+                                                fontSize = 11.sp
+                                            )
+                                        )
+                                    }
+
+                                    if (blocks.size > 1) {
+                                        IconButton(
+                                            onClick = {
+                                                blocks = deleteScheduleBlock(blocks, index)
+                                            },
+                                            enabled = !isCommitmentLockActive,
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.DeleteOutline,
+                                                contentDescription = "Delete block",
+                                                tint = if (isCommitmentLockActive) DesignTokens.Palette.DarkBorderSubtle else DesignTokens.Palette.GrayMuted,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
 
+                // Add / Split Block Button
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(DesignTokens.Shapes.Button)
                         .clickable {
-                            val targetIndex = blocks.indices.maxByOrNull { i ->
-                                blocks[i].endMinuteOfDay - blocks[i].startMinuteOfDay
-                            }
-                            if (targetIndex != null) {
-                                val target = blocks[targetIndex]
-                                val length = target.endMinuteOfDay - target.startMinuteOfDay
-                                if (length >= 2) {
-                                    val midpoint = target.startMinuteOfDay + (length / 2)
-                                    val first = target.copy(endMinuteOfDay = midpoint)
-                                    val second = target.copy(startMinuteOfDay = midpoint)
-                                    blocks = buildList {
-                                        addAll(blocks.take(targetIndex))
-                                        add(first)
-                                        add(second)
-                                        addAll(blocks.drop(targetIndex + 1))
-                                    }
-                                }
+                            if (blocks.isEmpty()) {
+                                blocks = defaultSimpleSchedule()
+                            } else {
+                                blocks = splitScheduleBlock(blocks, blocks.lastIndex)
                             }
                         },
                     shape = DesignTokens.Shapes.Button,
-                    color = DesignTokens.Palette.DarkElevated,
-                    border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
+                    color = DesignTokens.Palette.PureWhite,
+                    contentColor = DesignTokens.Palette.PureBlack
                 ) {
                     Text(
-                        text = "+ Add Block",
-                        modifier = Modifier.padding(vertical = 8.dp),
+                        text = if (blocks.isEmpty()) "+ Add 24h Schedule" else "+ Split / Add Block",
+                        modifier = Modifier.padding(vertical = 10.dp),
                         style = DesignTokens.Typography.caption().copy(
-                            color = DesignTokens.Palette.PureWhite,
-                            fontWeight = FontWeight.Bold
+                            color = DesignTokens.Palette.PureBlack,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         ),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -1092,19 +1190,25 @@ private fun ScheduleEditorDialog(
                 if (!validation.isValid) {
                     Text(
                         text = validation.errorMessage ?: "Invalid schedule",
-                        style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.WarningAccent)
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.WarningAccent,
+                            fontSize = 11.sp
+                        )
                     )
                 } else if (isCommitmentLockActive && !isTightening) {
                     Text(
                         text = "Commitment Lock active until ${formatLockUntil(commitmentLockUntilMillis)}. Only stricter schedule changes are allowed.",
-                        style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.WarningAccent)
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.WarningAccent,
+                            fontSize = 11.sp
+                        )
                     )
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = { onSave(blocks) }, enabled = canSave) {
-                Text("Save", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
+                Text("Save Schedule", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1118,12 +1222,12 @@ private fun ScheduleEditorDialog(
         val block = blocks.getOrNull(index)
         if (block != null) {
             EditBlockDialog(
-                block = block,
+                blockIndex = index,
+                totalBlocks = blocks.size,
+                allBlocks = blocks,
                 onDismiss = { editingIndex = null },
-                onSave = { updated ->
-                    blocks = blocks.mapIndexed { i, existing ->
-                        if (i == index) updated else existing
-                    }
+                onSave = { updatedBlock, updatedBlocks ->
+                    blocks = updatedBlocks
                     editingIndex = null
                 }
             )
@@ -1133,79 +1237,252 @@ private fun ScheduleEditorDialog(
 
 @Composable
 private fun EditBlockDialog(
-    block: ScheduleBlock,
-    onSave: (ScheduleBlock) -> Unit,
+    blockIndex: Int,
+    totalBlocks: Int,
+    allBlocks: List<ScheduleBlock>,
+    onSave: (ScheduleBlock, List<ScheduleBlock>) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var startText by remember(block) { mutableStateOf(toTimeInput(block.startMinuteOfDay)) }
-    var endText by remember(block) { mutableStateOf(toTimeInput(block.endMinuteOfDay)) }
-    var limitText by remember(block) { mutableStateOf(block.limitMinutes.toString()) }
-    var ruleType by remember(block) { mutableStateOf(block.ruleType) }
+    val currentBlock = allBlocks[blockIndex]
+    var ruleType by remember { mutableStateOf(currentBlock.ruleType) }
+    var limitMinutes by remember { mutableIntStateOf(currentBlock.limitMinutes) }
 
-    val parsedStart = parseTimeInput(startText)
-    val parsedEnd = parseTimeInput(endText)
-    val parsedLimit = limitText.toIntOrNull()
-    val isValid = parsedStart != null && parsedEnd != null && parsedStart < parsedEnd && parsedLimit != null && parsedLimit >= 0
+    val isFirst = blockIndex == 0
+    val isLast = blockIndex == allBlocks.lastIndex
+    val isSingle = totalBlocks <= 1
+
+    var startMinute by remember { mutableIntStateOf(currentBlock.startMinuteOfDay) }
+    var endMinute by remember { mutableIntStateOf(currentBlock.endMinuteOfDay) }
+    var activeTimeTab by remember { mutableIntStateOf(if (!isLast) 1 else 0) } // 0 = start, 1 = end
+
+    val minStart = if (isFirst) 0 else (allBlocks[blockIndex - 1].startMinuteOfDay + 5)
+    val maxStart = endMinute - 5
+    val minEnd = startMinute + 5
+    val maxEnd = if (isLast) 24 * 60 else (allBlocks[blockIndex + 1].endMinuteOfDay - 5)
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DesignTokens.Palette.DarkCard,
         shape = DesignTokens.Shapes.Card,
         title = {
-            Text(
-                "Edit Block",
-                style = DesignTokens.Typography.subtitle().copy(color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "Block ${blockIndex + 1} of $totalBlocks",
+                        style = DesignTokens.Typography.subtitle().copy(
+                            color = DesignTokens.Palette.PureWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    )
+                    Text(
+                        "${formatBlockDuration(startMinute, endMinute)} duration",
+                        style = DesignTokens.Typography.bodySmall().copy(
+                            color = DesignTokens.Palette.GrayMuted,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
+
+                Surface(
+                    shape = DesignTokens.Shapes.Badge,
+                    color = DesignTokens.Palette.DarkElevated,
+                    border = BorderStroke(1.dp, DesignTokens.Palette.DarkBorder)
+                ) {
+                    Text(
+                        "${formatMinuteOfDay(startMinute)} – ${formatMinuteOfDay(endMinute)}",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        style = DesignTokens.Typography.caption().copy(
+                            color = DesignTokens.Palette.PureWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    )
+                }
+            }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.OutlinedTextField(
-                    value = startText,
-                    onValueChange = { startText = it },
-                    label = { Text("Start (HH:MM)") },
-                    singleLine = true
-                )
-                androidx.compose.material3.OutlinedTextField(
-                    value = endText,
-                    onValueChange = { endText = it },
-                    label = { Text("End (HH:MM)") },
-                    singleLine = true
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IntervalChip(label = "Hourly", selected = ruleType == ScheduleRuleType.HOURLY_QUOTA) {
-                        ruleType = ScheduleRuleType.HOURLY_QUOTA
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Rule Type Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        shape = DesignTokens.Shapes.Chip,
+                        color = if (ruleType == ScheduleRuleType.HOURLY_QUOTA) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkElevated,
+                        border = BorderStroke(1.dp, if (ruleType == ScheduleRuleType.HOURLY_QUOTA) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorderSubtle),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(DesignTokens.Shapes.Chip)
+                            .clickable { ruleType = ScheduleRuleType.HOURLY_QUOTA }
+                    ) {
+                        Text(
+                            "Hourly Quota",
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            style = DesignTokens.Typography.caption().copy(
+                                color = if (ruleType == ScheduleRuleType.HOURLY_QUOTA) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            ),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
                     }
-                    IntervalChip(label = "Flat", selected = ruleType == ScheduleRuleType.FLAT_ALLOWANCE) {
-                        ruleType = ScheduleRuleType.FLAT_ALLOWANCE
+
+                    Surface(
+                        shape = DesignTokens.Shapes.Chip,
+                        color = if (ruleType == ScheduleRuleType.FLAT_ALLOWANCE) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkElevated,
+                        border = BorderStroke(1.dp, if (ruleType == ScheduleRuleType.FLAT_ALLOWANCE) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorderSubtle),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(DesignTokens.Shapes.Chip)
+                            .clickable { ruleType = ScheduleRuleType.FLAT_ALLOWANCE }
+                    ) {
+                        Text(
+                            "Flat Allowance",
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            style = DesignTokens.Typography.caption().copy(
+                                color = if (ruleType == ScheduleRuleType.FLAT_ALLOWANCE) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            ),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
                     }
                 }
-                androidx.compose.material3.OutlinedTextField(
-                    value = limitText,
-                    onValueChange = { limitText = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("Limit (minutes)") },
-                    singleLine = true
-                )
-                if (!isValid) {
-                    Text(
-                        "Use valid times and non-negative minutes.",
-                        style = DesignTokens.Typography.bodySmall().copy(color = DesignTokens.Palette.WarningAccent)
+
+                // Limit Selector
+                Text(
+                    "ALLOWED USAGE LIMIT",
+                    style = DesignTokens.Typography.caption().copy(
+                        color = DesignTokens.Palette.GrayMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
                     )
+                )
+                com.hourlock.app.ui.components.LimitSelector(
+                    limitMinutes = limitMinutes,
+                    onLimitMinutesChanged = { limitMinutes = it }
+                )
+
+                // Time Boundary Adjuster
+                if (!isSingle) {
+                    Text(
+                        "ADJUST TIME BOUNDARY",
+                        style = DesignTokens.Typography.caption().copy(
+                            color = DesignTokens.Palette.GrayMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    )
+
+                    // Start/End selection tabs
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (!isFirst) {
+                            Surface(
+                                shape = DesignTokens.Shapes.Badge,
+                                color = if (activeTimeTab == 0) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkElevated,
+                                border = BorderStroke(1.dp, if (activeTimeTab == 0) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorderSubtle),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(DesignTokens.Shapes.Badge)
+                                    .clickable { activeTimeTab = 0 }
+                            ) {
+                                Text(
+                                    "Start: ${formatMinuteOfDay(startMinute)}",
+                                    modifier = Modifier.padding(vertical = 6.dp),
+                                    style = DesignTokens.Typography.caption().copy(
+                                        color = if (activeTimeTab == 0) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    ),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+
+                        if (!isLast) {
+                            Surface(
+                                shape = DesignTokens.Shapes.Badge,
+                                color = if (activeTimeTab == 1) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkElevated,
+                                border = BorderStroke(1.dp, if (activeTimeTab == 1) DesignTokens.Palette.PureWhite else DesignTokens.Palette.DarkBorderSubtle),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(DesignTokens.Shapes.Badge)
+                                    .clickable { activeTimeTab = 1 }
+                            ) {
+                                Text(
+                                    "End: ${formatMinuteOfDay(endMinute)}",
+                                    modifier = Modifier.padding(vertical = 6.dp),
+                                    style = DesignTokens.Typography.caption().copy(
+                                        color = if (activeTimeTab == 1) DesignTokens.Palette.PureBlack else DesignTokens.Palette.GraySecondary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    ),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+
+                    if (activeTimeTab == 0 && !isFirst) {
+                        com.hourlock.app.ui.components.TimeWheelPicker(
+                            minuteOfDay = startMinute,
+                            onMinuteOfDayChanged = { startMinute = it },
+                            minMinute = minStart,
+                            maxMinute = maxStart,
+                            allow24HourEnd = false
+                        )
+                    } else if (activeTimeTab == 1 && !isLast) {
+                        com.hourlock.app.ui.components.TimeWheelPicker(
+                            minuteOfDay = endMinute,
+                            onMinuteOfDayChanged = { endMinute = it },
+                            minMinute = minEnd,
+                            maxMinute = maxEnd,
+                            allow24HourEnd = isLast
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(
-                        ScheduleBlock(
-                            startMinuteOfDay = parsedStart!!,
-                            endMinuteOfDay = parsedEnd!!,
-                            ruleType = ruleType,
-                            limitMinutes = parsedLimit!!
-                        )
+                    val updatedCurrent = currentBlock.copy(
+                        startMinuteOfDay = startMinute,
+                        endMinuteOfDay = endMinute,
+                        ruleType = ruleType,
+                        limitMinutes = limitMinutes
                     )
-                },
-                enabled = isValid
+
+                    // Synchronize adjacent blocks to ensure ZERO gaps
+                    val updatedBlocks = allBlocks.mapIndexed { i, block ->
+                        when (i) {
+                            blockIndex -> updatedCurrent
+                            blockIndex - 1 -> block.copy(endMinuteOfDay = startMinute)
+                            blockIndex + 1 -> block.copy(startMinuteOfDay = endMinute)
+                            else -> block
+                        }
+                    }
+
+                    onSave(updatedCurrent, updatedBlocks)
+                }
             ) {
                 Text("Apply", color = DesignTokens.Palette.PureWhite, fontWeight = FontWeight.Bold)
             }
@@ -1253,7 +1530,7 @@ private fun CopyScheduleDialog(
                             .fillMaxWidth()
                             .clip(DesignTokens.Shapes.Button)
                             .clickable {
-                                selected = if (targetPkg in selected) selected - targetPkg else selected + targetPkg
+                                selected = if (targetPkg in selected) selected.minus(targetPkg) else selected.plus(targetPkg)
                             }
                             .padding(vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1266,7 +1543,7 @@ private fun CopyScheduleDialog(
                         MonochromeSwitch(
                             checked = targetPkg in selected,
                             onCheckedChange = {
-                                selected = if (it) selected + targetPkg else selected - targetPkg
+                                selected = if (it) selected.plus(targetPkg) else selected.minus(targetPkg)
                             }
                         )
                     }
@@ -1284,24 +1561,6 @@ private fun CopyScheduleDialog(
             }
         }
     )
-}
-
-private fun parseTimeInput(value: String): Int? {
-    val parts = value.trim().split(":")
-    if (parts.size != 2) return null
-    val hour = parts[0].toIntOrNull() ?: return null
-    val minute = parts[1].toIntOrNull() ?: return null
-    if (hour !in 0..24) return null
-    if (minute !in 0..59) return null
-    if (hour == 24 && minute != 0) return null
-    return (hour * 60 + minute).coerceIn(0, 24 * 60)
-}
-
-private fun toTimeInput(minuteOfDay: Int): String {
-    val m = minuteOfDay.coerceIn(0, 24 * 60)
-    val hour = m / 60
-    val minute = m % 60
-    return String.format(Locale.US, "%02d:%02d", hour, minute)
 }
 
 // ─── SECTION HEADER ────────────────────────────────────────────────────────────

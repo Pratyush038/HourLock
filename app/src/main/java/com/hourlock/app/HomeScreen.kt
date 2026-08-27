@@ -86,13 +86,11 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    onNavigateToStats: () -> Unit,
     onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
     val view = LocalView.current
     val repo = remember { PrefsRepository(context) }
-    val analyticsRepo = remember { UsageLogRepository(context) }
     val scope = rememberCoroutineScope()
 
     // ── Live preferences state ─────────────────────────────────────────────
@@ -177,53 +175,26 @@ fun HomeScreen(
                         )
                     }
 
-                    // Action Icons (Stats + Settings)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(DesignTokens.Spacing.sm),
-                        verticalAlignment = Alignment.CenterVertically
+                    // Settings Action Icon
+                    Surface(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(DesignTokens.Shapes.Pill)
+                            .clickable {
+                                try { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) } catch (_: Exception) {}
+                                onNavigateToSettings()
+                            },
+                        shape = DesignTokens.Shapes.Pill,
+                        color = DesignTokens.Palette.DarkCard,
+                        border = BorderStroke(DesignTokens.Elevation.borderWidth, DesignTokens.Palette.DarkBorder)
                     ) {
-                        Surface(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(DesignTokens.Shapes.Pill)
-                                .clickable {
-                                    try { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) } catch (_: Exception) {}
-                                    onNavigateToStats()
-                                },
-                            shape = DesignTokens.Shapes.Pill,
-                            color = DesignTokens.Palette.DarkCard,
-                            border = BorderStroke(DesignTokens.Elevation.borderWidth, DesignTokens.Palette.DarkBorder)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Filled.BarChart,
-                                    contentDescription = "Stats & Insights",
-                                    tint = DesignTokens.Palette.PureWhite,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        Surface(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(DesignTokens.Shapes.Pill)
-                                .clickable {
-                                    try { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) } catch (_: Exception) {}
-                                    onNavigateToSettings()
-                                },
-                            shape = DesignTokens.Shapes.Pill,
-                            color = DesignTokens.Palette.DarkCard,
-                            border = BorderStroke(DesignTokens.Elevation.borderWidth, DesignTokens.Palette.DarkBorder)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Filled.Settings,
-                                    contentDescription = "Settings",
-                                    tint = DesignTokens.Palette.PureWhite,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.Settings,
+                                contentDescription = "Settings",
+                                tint = DesignTokens.Palette.PureWhite,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }

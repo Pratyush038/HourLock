@@ -63,14 +63,7 @@ fun HourLockNavHost() {
     ) {
         composable("home") {
             HomeScreen(
-                onNavigateToStats = { navController.navigate("stats") },
                 onNavigateToSettings = { navController.navigate("settings") }
-            )
-        }
-
-        composable("stats") {
-            StatsScreen(
-                onBack = { navController.popBackStack() }
             )
         }
 
