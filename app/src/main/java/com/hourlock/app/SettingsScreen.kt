@@ -105,6 +105,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var a11yGranted by remember { mutableStateOf(false) }
     var usageGranted by remember { mutableStateOf(false) }
     var batteryOptExempt by remember { mutableStateOf(false) }
+    var overlayGranted by remember { mutableStateOf(false) }
 
     var showResetDialog by remember { mutableStateOf(false) }
     var showCommitmentDialog by remember { mutableStateOf(false) }
@@ -117,6 +118,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 val pm = context.getSystemService(PowerManager::class.java)
                 pm.isIgnoringBatteryOptimizations(context.packageName)
             } catch (_: Exception) { false }
+            overlayGranted = Settings.canDrawOverlays(context)
             delay(2000L)
         }
     }
@@ -223,6 +225,24 @@ fun SettingsScreen(onBack: () -> Unit) {
                                             .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
                                     )
                                 }
+                            }
+                        )
+
+                        HorizontalDivider(color = DesignTokens.Palette.DarkBorderSubtle, thickness = 0.5.dp)
+
+                        PermissionRowItem(
+                            label = "Display Over Other Apps",
+                            description = "Recommended — enables blocking without Accessibility",
+                            icon = Icons.Filled.Layers,
+                            granted = overlayGranted,
+                            onGrant = {
+                                try { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) } catch (_: Exception) {}
+                                context.startActivity(
+                                    Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${context.packageName}")
+                                    ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                                )
                             }
                         )
                     }

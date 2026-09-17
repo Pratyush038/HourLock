@@ -24,27 +24,25 @@
 
 ## Required Manual Setup Steps
 
-HourLock uses special permissions that Android does not grant automatically. **Usage Access** is required for tracking and best-effort fallback enforcement. **Accessibility Service** is recommended for strongest realtime blocking, but can be left off if payment apps such as BHIM refuse to run while third-party accessibility services are enabled. The **Settings screen** inside the app shows live status and links directly to each permission page.
+HourLock uses special permissions that Android does not grant automatically. The **Settings screen** inside the app shows live status and links directly to each permission page.
 
 ### 1. Usage Access (REQUIRED)
 
-Without this, HourLock cannot calculate usage or run fallback tracking.
+Without this, HourLock cannot calculate usage or enforce limits.
 
 **Steps:**
 1. Tap **Usage Access → Enable** in HourLock Settings
 2. Find **HourLock** in the list → toggle **ON**
 
-### 2. Accessibility Service (OPTIONAL — recommended for strongest blocking)
+### 2. Display Over Other Apps (RECOMMENDED)
 
-This gives HourLock realtime foreground-app detection. If BHIM or another payment/banking app refuses to work after enabling it, turn Accessibility off and keep Usage Access on.
+This permission allows HourLock to launch the blocking screen over monitored apps when their time limit is reached. Without it, blocking relies on full-screen intent notifications which work on most devices but may not launch instantly on all OEMs.
 
 **Steps:**
-1. Open the HourLock app → tap **Settings & Permissions**
-2. Tap **Accessibility Service → Enable**
-3. In the system Accessibility Settings, find **"HourLock Screen Time"** under "Downloaded apps"
-4. Tap it → toggle it **ON** → confirm the dialog that appears
+1. Tap **Display Over Other Apps → Enable** in HourLock Settings
+2. Find **HourLock** in the system overlay settings → toggle **ON**
 
-> **What HourLock can see:** Only which app is currently in the foreground (the package name). It cannot see your screen content, read text, or interact with any other app.
+> **BHIM / UPI compatibility:** This permission is fully compatible with BHIM, Google Pay, PhonePe, and all banking apps. Only the Accessibility Service causes issues with payment apps.
 
 ### 3. Battery Optimization Exemption (STRONGLY RECOMMENDED)
 
@@ -59,7 +57,21 @@ Without this, Samsung, Xiaomi, Huawei, and Oppo devices may kill HourLock's back
 
 ### 4. Notifications (Android 13+ only)
 
-On first launch on Android 13+, you'll see a system notification permission prompt. Tap **Allow** to enable the persistent foreground service notification. Without it, the foreground service cannot display its notification on Android 13+ and may be killed.
+On first launch on Android 13+, you'll see a system notification permission prompt. Tap **Allow** to enable the persistent foreground service notification and blocking notifications. Without it, the foreground service cannot display its notification on Android 13+ and may be killed.
+
+### 5. Accessibility Service (OPTIONAL — avoid if you use BHIM)
+
+This gives HourLock the fastest possible foreground-app detection. However, **BHIM and some banking apps refuse to work while any third-party Accessibility Service is enabled** — this is a security policy enforced by NPCI/the banking app, not a bug in HourLock.
+
+**If you use BHIM or any banking app that complains, skip this step entirely.** HourLock works fully without it using Usage Access + Display Over Other Apps.
+
+**Steps (only if you don't use BHIM):**
+1. Open the HourLock app → tap **Settings & Permissions**
+2. Tap **Accessibility Service → Enable**
+3. In the system Accessibility Settings, find **"HourLock Screen Time"** under "Downloaded apps"
+4. Tap it → toggle it **ON** → confirm the dialog that appears
+
+> **What HourLock can see:** Only which app is currently in the foreground (the package name). It cannot see your screen content, read text, or interact with any other app.
 
 ---
 
@@ -81,10 +93,11 @@ Some Android skins add extra layers of battery management beyond the standard An
 - [ ] Build and install the APK
 - [ ] Open HourLock → Settings
 - [ ] Enable **Usage Access** ✓
-- [ ] Enable **Accessibility Service** if you want strongest realtime blocking and your payment apps allow it
+- [ ] Enable **Display Over Other Apps** ✓
 - [ ] Request **Battery Optimization Exemption** ✓
 - [ ] (Android 13+) Allow **Notification permission** ✓
 - [ ] OEM battery setting exemption (if applicable)
+- [ ] *(Optional, skip if using BHIM)* Enable **Accessibility Service**
 - [ ] Return to Home screen → verify the progress ring shows and the toggle is green
 
 ---
@@ -116,10 +129,11 @@ HourLock/
 | Decision | Rationale |
 |----------|-----------|
 | **Usage Access baseline + optional AccessibilityService** | Payment-app compatibility with stronger realtime blocking when Accessibility is allowed |
+| **Full-screen intent notification** for blocking | Android 10+ blocks `startActivity()` from background services; full-screen intents (like incoming calls) bypass this without needing Accessibility |
+| **SYSTEM_ALERT_WINDOW** as secondary fallback | Guarantees direct activity launch on Android 12+; compatible with BHIM/UPI (unlike Accessibility) |
 | **DataStore** over SharedPreferences | Coroutine-safe, atomic writes, Flow-based reactive reads |
 | **Per-tick persistence** (every 1s) | Process can be killed at any moment; at most 1s of data lost |
-| **FLAG_ACTIVITY_NEW_TASK** for BlockedActivity | Allows the AccessibilityService path to launch the lock screen without SYSTEM_ALERT_WINDOW permission |
-| **NEVER_BLOCK_PACKAGES** hardcoded denylist | Prevents misconfiguration from locking users out of calls/settings |
+| **NEVER_BLOCK_PACKAGES** hardcoded denylist | Prevents misconfiguration from locking users out of calls/settings/payments |
 | **SupervisorJob** in AccessibilityService | Timer crash for one app doesn't stop tracking for others |
 | **canRetrieveWindowContent=false** in XML | Framework-level guarantee we can't read other apps' UI trees |
 

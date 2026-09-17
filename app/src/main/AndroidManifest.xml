@@ -27,6 +27,22 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
+        USE_FULL_SCREEN_INTENT: allows launching BlockedActivity via a full-screen
+        intent notification (same mechanism as incoming calls). This is the primary
+        mechanism for blocking apps when Accessibility Service is OFF. Auto-granted
+        for sideloaded APKs; on Play Store requires exemption.
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <!--
+        SYSTEM_ALERT_WINDOW: "Display over other apps". Secondary fallback for
+        Android 12+ where full-screen intents alone may not launch the activity.
+        User grants this manually via Settings. Compatible with BHIM/UPI apps
+        (they only reject Accessibility Services, not overlay permissions).
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!--
         QUERY_ALL_PACKAGES: needed to list all installed apps in Settings screen
         so the user can pick which apps to monitor.
         NOTE: we do NOT use INTERNET or any network permission — the app is

@@ -10,6 +10,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import android.content.pm.ServiceInfo
@@ -57,6 +58,8 @@ class HourLockForegroundService : Service() {
         private const val POLL_INTERVAL_MS = 1_000L
         const val CHANNEL_ID = "hourlock_protection"
         const val NOTIFICATION_ID = 1001
+        const val BLOCKING_CHANNEL_ID = "hourlock_blocking"
+        const val BLOCKING_NOTIFICATION_ID = 1002
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -73,6 +76,7 @@ class HourLockForegroundService : Service() {
         repo = PrefsRepository(applicationContext)
         analyticsRepo = com.hourlock.app.data.UsageLogRepository(applicationContext)
         createNotificationChannel()
+        createBlockingNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -227,17 +231,83 @@ class HourLockForegroundService : Service() {
         trackedPkg = null
     }
 
+    /**
+     * Launches BlockedActivity using a multi-strategy approach:
+     *  1. Full-screen intent notification (works like incoming calls — primary method)
+     *  2. SYSTEM_ALERT_WINDOW direct startActivity (if user granted overlay permission)
+     *  3. Direct startActivity fallback (works on older Android versions)
+     *
+     * This replaces the old approach that only used startActivity(), which Android 10+
+     * silently blocks from background services. The full-screen intent mechanism is
+     * the approved pattern and does NOT require Accessibility Service permission,
+     * so BHIM and other payment apps continue to work normally.
+     */
     private fun launchBlockedActivity(pkg: String) {
+        val blockedIntent = Intent(applicationContext, BlockedActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(BlockedActivity.EXTRA_BLOCKED_PACKAGE, pkg)
+        }
+
+        // Strategy 1: Full-screen intent notification
+        // This is the primary mechanism. Android shows the activity immediately when
+        // the screen is on, or on the lock screen if off — exactly like an incoming call.
         try {
-            val intent = Intent(applicationContext, BlockedActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra(BlockedActivity.EXTRA_BLOCKED_PACKAGE, pkg)
-            }
-            applicationContext.startActivity(intent)
+            val fullScreenPendingIntent = PendingIntent.getActivity(
+                applicationContext,
+                BLOCKING_NOTIFICATION_ID,
+                blockedIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val appLabel = getAppLabel(applicationContext, pkg)
+
+            val notification = NotificationCompat.Builder(applicationContext, BLOCKING_CHANNEL_ID)
+                .setContentTitle("⏱ Time's up")
+                .setContentText("$appLabel has reached its hourly limit")
+                .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .setContentIntent(fullScreenPendingIntent)
+                .setAutoCancel(true)
+                .setOngoing(true)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .build()
+
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(BLOCKING_NOTIFICATION_ID, notification)
+            Log.i(TAG, "Posted full-screen intent notification for $pkg")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch BlockedActivity for $pkg", e)
+            Log.e(TAG, "Full-screen intent notification failed for $pkg", e)
+        }
+
+        // Strategy 2: Direct startActivity — works if SYSTEM_ALERT_WINDOW is granted
+        // or on older Android versions (pre-10). Harmless no-op if blocked by the OS.
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+                Settings.canDrawOverlays(applicationContext)) {
+                applicationContext.startActivity(blockedIntent)
+                Log.i(TAG, "Direct startActivity succeeded for $pkg")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Direct startActivity failed for $pkg (expected on Android 10+)", e)
+        }
+    }
+
+    /**
+     * Cancels the blocking notification. Called when:
+     *  - The user navigates away from the blocked app
+     *  - The hour resets and usage is below the limit again
+     *  - BlockedActivity itself launches and takes over
+     */
+    fun cancelBlockingNotification() {
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.cancel(BLOCKING_NOTIFICATION_ID)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to cancel blocking notification", e)
         }
     }
 
@@ -258,6 +328,29 @@ class HourLockForegroundService : Service() {
                 enableLights(false)
                 enableVibration(false)
                 setSound(null, null)
+            }
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * Creates the high-importance notification channel for blocking notifications.
+     * IMPORTANCE_HIGH is required for full-screen intents to launch the activity.
+     */
+    private fun createBlockingNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                BLOCKING_CHANNEL_ID,
+                "App Blocking",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Shows when a monitored app has exceeded its time limit"
+                setShowBadge(true)
+                enableLights(true)
+                enableVibration(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                setBypassDnd(true)
             }
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)

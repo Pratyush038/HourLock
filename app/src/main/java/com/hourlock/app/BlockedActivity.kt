@@ -1,5 +1,6 @@
 package com.hourlock.app
 
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -68,6 +69,7 @@ class BlockedActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        dismissBlockingNotification()
         val pkg = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE) ?: "Monitored App"
         setContent {
             HourLockTheme(darkTheme = true) {
@@ -91,6 +93,17 @@ class BlockedActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /**
+     * Dismiss the full-screen blocking notification that launched this activity.
+     * Safe to call even if no such notification exists.
+     */
+    private fun dismissBlockingNotification() {
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.cancel(HourLockForegroundService.BLOCKING_NOTIFICATION_ID)
+        } catch (_: Exception) {}
     }
 
     private fun navigateHome() {
