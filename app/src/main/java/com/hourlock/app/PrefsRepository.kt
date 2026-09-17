@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.first
  */
 
 import android.content.Context
+import java.util.Calendar
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -113,6 +114,19 @@ val NEVER_BLOCK_PACKAGES = setOf(
     "com.sec.android.app.launcher",
     // HourLock itself — never block our own package
     "com.hourlock.app",
+    // Common UPI/payment apps. Some financial apps are intentionally strict
+    // about overlays and accessibility services; HourLock should never lock
+    // users inside or over a payment flow.
+    "in.org.npci.upiapp",                         // BHIM
+    "com.google.android.apps.nbu.paisa.user",     // Google Pay
+    "com.phonepe.app",                            // PhonePe
+    "net.one97.paytm",                            // Paytm
+    "com.mobikwik_new",                           // MobiKwik
+    "com.freecharge.android",                     // Freecharge
+    "com.csam.icici.bank.imobile",                // ICICI iMobile
+    "com.sbi.SBIFreedomPlus",                     // SBI YONO
+    "com.axis.mobile",                            // Axis Mobile
+    "com.snapwork.hdfc",                          // HDFC Mobile Banking
 )
 
 /**
@@ -127,6 +141,17 @@ val TRANSIENT_SYSTEM_PACKAGES = setOf(
     "com.touchtype.swiftkey",               // SwiftKey
 )
 
+fun nextHourStartMillis(fromMillis: Long): Long {
+    val cal = Calendar.getInstance().apply {
+        timeInMillis = fromMillis
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+        add(Calendar.HOUR_OF_DAY, 1)
+    }
+    return cal.timeInMillis
+}
+
 // ── Repository class ───────────────────────────────────────────────────────────
 
 class PrefsRepository(private val context: Context) {
@@ -137,7 +162,7 @@ class PrefsRepository(private val context: Context) {
 
     /** Flow of the current set of monitored package names. */
     val monitoredPackagesFlow: Flow<Set<String>> = dataStore.data.map { prefs ->
-        prefs[KEY_MONITORED_PACKAGES] ?: setOf("com.instagram.android")
+        (prefs[KEY_MONITORED_PACKAGES] ?: setOf("com.instagram.android")) - NEVER_BLOCK_PACKAGES
     }
 
     /** Read current monitored packages synchronously (for use inside services). */
@@ -167,7 +192,7 @@ class PrefsRepository(private val context: Context) {
     }
 
     suspend fun pauseForOneHour() {
-        val until = System.currentTimeMillis() + 3_600_000L
+        val until = nextHourStartMillis()
         dataStore.edit { prefs -> prefs[KEY_PAUSE_UNTIL_MILLIS] = until }
     }
 
@@ -275,10 +300,10 @@ class PrefsRepository(private val context: Context) {
      * E.g. at 14:37:22, this returns the millis for 14:00:00.
      */
     fun currentHourStartMillis(): Long {
-        val cal = java.util.Calendar.getInstance()
-        cal.set(java.util.Calendar.MINUTE, 0)
-        cal.set(java.util.Calendar.SECOND, 0)
-        cal.set(java.util.Calendar.MILLISECOND, 0)
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
         return cal.timeInMillis
     }
 
@@ -287,12 +312,7 @@ class PrefsRepository(private val context: Context) {
      * Used by BlockedActivity to display "unlocks at XX:00".
      */
     fun nextHourStartMillis(): Long {
-        val cal = java.util.Calendar.getInstance()
-        cal.set(java.util.Calendar.MINUTE, 0)
-        cal.set(java.util.Calendar.SECOND, 0)
-        cal.set(java.util.Calendar.MILLISECOND, 0)
-        cal.add(java.util.Calendar.HOUR_OF_DAY, 1)
-        return cal.timeInMillis
+        return com.hourlock.app.nextHourStartMillis(System.currentTimeMillis())
     }
 
     // ─── Per-package schedule limits ──────────────────────────────────────

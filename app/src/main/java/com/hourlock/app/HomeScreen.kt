@@ -102,12 +102,10 @@ fun HomeScreen(
     val isCommitmentLockActive = commitmentLockUntil > System.currentTimeMillis()
 
     // ── Permission state ───────────────────────────────────────────────────
-    var a11yGranted by remember { mutableStateOf(false) }
     var usageGranted by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         while (true) {
-            a11yGranted = isAccessibilityServiceEnabled(context)
             usageGranted = isUsageAccessGranted(context)
             delay(2000L)
         }
@@ -201,10 +199,9 @@ fun HomeScreen(
             }
 
             // ── PERMISSION WARNING BANNER (If setup incomplete) ────────────────
-            if (!a11yGranted || !usageGranted) {
+            if (!usageGranted) {
                 item {
                     PermissionAlertBanner(
-                        a11yGranted = a11yGranted,
                         usageGranted = usageGranted,
                         onFix = onNavigateToSettings
                     )
@@ -618,7 +615,6 @@ private fun AppLockRowCard(
 
 @Composable
 private fun PermissionAlertBanner(
-    a11yGranted: Boolean,
     usageGranted: Boolean,
     onFix: () -> Unit
 ) {
@@ -646,12 +642,8 @@ private fun PermissionAlertBanner(
                         fontSize = 15.sp
                     )
                 )
-                val missing = buildList {
-                    if (!a11yGranted) add("Accessibility")
-                    if (!usageGranted) add("Usage Access")
-                }.joinToString(" & ")
                 Text(
-                    "Grant $missing to enable lock enforcement",
+                    if (usageGranted) "Usage tracking is ready" else "Grant Usage Access to enable usage tracking",
                     style = DesignTokens.Typography.bodySmall().copy(
                         color = DesignTokens.Palette.GraySecondary,
                         fontSize = 12.sp

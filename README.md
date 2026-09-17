@@ -24,11 +24,19 @@
 
 ## Required Manual Setup Steps
 
-HourLock requires **three** special permissions that Android does not grant automatically — each must be enabled manually in system settings. The **Settings screen** inside the app shows live status and links directly to each permission page.
+HourLock uses special permissions that Android does not grant automatically. **Usage Access** is required for tracking and best-effort fallback enforcement. **Accessibility Service** is recommended for strongest realtime blocking, but can be left off if payment apps such as BHIM refuse to run while third-party accessibility services are enabled. The **Settings screen** inside the app shows live status and links directly to each permission page.
 
-### 1. Accessibility Service (REQUIRED — core feature won't work without this)
+### 1. Usage Access (REQUIRED)
 
-This is the most critical permission. Without it, HourLock cannot detect when a monitored app is in the foreground.
+Without this, HourLock cannot calculate usage or run fallback tracking.
+
+**Steps:**
+1. Tap **Usage Access → Enable** in HourLock Settings
+2. Find **HourLock** in the list → toggle **ON**
+
+### 2. Accessibility Service (OPTIONAL — recommended for strongest blocking)
+
+This gives HourLock realtime foreground-app detection. If BHIM or another payment/banking app refuses to work after enabling it, turn Accessibility off and keep Usage Access on.
 
 **Steps:**
 1. Open the HourLock app → tap **Settings & Permissions**
@@ -37,14 +45,6 @@ This is the most critical permission. Without it, HourLock cannot detect when a 
 4. Tap it → toggle it **ON** → confirm the dialog that appears
 
 > **What HourLock can see:** Only which app is currently in the foreground (the package name). It cannot see your screen content, read text, or interact with any other app.
-
-### 2. Usage Access (REQUIRED for "Today's total" stat on Home screen)
-
-Without this, the daily usage stat shows "0s" but blocking still works.
-
-**Steps:**
-1. Tap **Usage Access → Enable** in HourLock Settings
-2. Find **HourLock** in the list → toggle **ON**
 
 ### 3. Battery Optimization Exemption (STRONGLY RECOMMENDED)
 
@@ -80,8 +80,8 @@ Some Android skins add extra layers of battery management beyond the standard An
 
 - [ ] Build and install the APK
 - [ ] Open HourLock → Settings
-- [ ] Enable **Accessibility Service** ✓
 - [ ] Enable **Usage Access** ✓
+- [ ] Enable **Accessibility Service** if you want strongest realtime blocking and your payment apps allow it
 - [ ] Request **Battery Optimization Exemption** ✓
 - [ ] (Android 13+) Allow **Notification permission** ✓
 - [ ] OEM battery setting exemption (if applicable)
@@ -99,8 +99,8 @@ HourLock/
 │   ├── HomeScreen.kt                # Dashboard: ring, toggle, today stat
 │   ├── SettingsScreen.kt            # Permissions, apps, safety controls
 │   ├── BlockedActivity.kt           # Full-screen lock overlay + challenge UI
-│   ├── UsageTrackerService.kt       # AccessibilityService — event listener
-│   ├── HourLockForegroundService.kt # Keep-alive foreground service
+│   ├── UsageTrackerService.kt       # Optional AccessibilityService realtime listener
+│   ├── HourLockForegroundService.kt # Keep-alive + Usage Access fallback tracking
 │   ├── PrefsRepository.kt           # DataStore layer — all persisted state
 │   └── ui/theme/                    # Material 3 theme, colors, typography
 ├── app/src/main/res/
@@ -115,10 +115,10 @@ HourLock/
 
 | Decision | Rationale |
 |----------|-----------|
-| **AccessibilityService** over UsageStatsManager polling | Real-time (no polling delay), no background-thread overhead |
+| **Usage Access baseline + optional AccessibilityService** | Payment-app compatibility with stronger realtime blocking when Accessibility is allowed |
 | **DataStore** over SharedPreferences | Coroutine-safe, atomic writes, Flow-based reactive reads |
 | **Per-tick persistence** (every 1s) | Process can be killed at any moment; at most 1s of data lost |
-| **FLAG_ACTIVITY_NEW_TASK** for BlockedActivity | Allows overlay without SYSTEM_ALERT_WINDOW permission |
+| **FLAG_ACTIVITY_NEW_TASK** for BlockedActivity | Allows the AccessibilityService path to launch the lock screen without SYSTEM_ALERT_WINDOW permission |
 | **NEVER_BLOCK_PACKAGES** hardcoded denylist | Prevents misconfiguration from locking users out of calls/settings |
 | **SupervisorJob** in AccessibilityService | Timer crash for one app doesn't stop tracking for others |
 | **canRetrieveWindowContent=false** in XML | Framework-level guarantee we can't read other apps' UI trees |

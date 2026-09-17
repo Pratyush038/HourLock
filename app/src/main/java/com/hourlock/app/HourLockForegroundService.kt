@@ -1,5 +1,7 @@
 package com.hourlock.app
 
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -11,6 +13,14 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import android.content.pm.ServiceInfo
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * HourLockForegroundService
@@ -37,20 +47,31 @@ import android.content.pm.ServiceInfo
  *    handle this gracefully.
  *  - State (usedSeconds) is already persisted in DataStore on every tick by
  *    UsageTrackerService, so restart after kill loses at most 1 second of data.
- *  - We do NOT duplicate timers here — the AccessibilityService owns the timer.
- *    This service is purely a "keep-alive" vessel.
+ *  - If Accessibility is disabled, this service falls back to Usage Access
+ *    polling so payment apps that reject accessibility services can still work.
  */
 class HourLockForegroundService : Service() {
 
     companion object {
         private const val TAG = "HourLock.FgService"
+        private const val POLL_INTERVAL_MS = 1_000L
         const val CHANNEL_ID = "hourlock_protection"
         const val NOTIFICATION_ID = 1001
     }
 
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private lateinit var repo: PrefsRepository
+    private lateinit var analyticsRepo: com.hourlock.app.data.UsageLogRepository
+    private var pollingJob: Job? = null
+    private var trackedPkg: String? = null
+    private var lastPollTimeMillis: Long = 0L
+    private var wasAccessibilityEnabled: Boolean = false
+
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "HourLockForegroundService created")
+        repo = PrefsRepository(applicationContext)
+        analyticsRepo = com.hourlock.app.data.UsageLogRepository(applicationContext)
         createNotificationChannel()
     }
 
@@ -68,6 +89,7 @@ class HourLockForegroundService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, buildNotification())
         }
+        startUsageAccessFallback()
         // START_STICKY: the OS will restart this service if killed. When
         // restarted, onStartCommand is called with intent=null. The
         // AccessibilityService (if still running) will call startForegroundService
@@ -81,8 +103,142 @@ class HourLockForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        pollingJob?.cancel()
+        serviceScope.cancel()
         super.onDestroy()
         Log.i(TAG, "HourLockForegroundService destroyed")
+    }
+
+    // ── Usage Access fallback ─────────────────────────────────────────────
+
+    private fun startUsageAccessFallback() {
+        if (pollingJob?.isActive == true) return
+
+        pollingJob = serviceScope.launch {
+            lastPollTimeMillis = System.currentTimeMillis() - 3_600_000L
+            while (true) {
+                try {
+                    pollUsageAccessOnce()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Usage Access fallback poll failed", e)
+                }
+                delay(POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun pollUsageAccessOnce() {
+        if (isAccessibilityServiceEnabled(applicationContext)) {
+            stopFallbackTracking("accessibility service active")
+            lastPollTimeMillis = System.currentTimeMillis()
+            wasAccessibilityEnabled = true
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        val fromMillis = if (wasAccessibilityEnabled) now - 3_600_000L else lastPollTimeMillis
+        wasAccessibilityEnabled = false
+
+        val foregroundPkg = findForegroundPackageSince(fromMillis, now)
+        lastPollTimeMillis = now
+
+        if (foregroundPkg == null || foregroundPkg in TRANSIENT_SYSTEM_PACKAGES || foregroundPkg in NEVER_BLOCK_PACKAGES) {
+            if (foregroundPkg != null) stopFallbackTracking("safe or transient package: $foregroundPkg")
+            return
+        }
+
+        val monitoredPackages = repo.getMonitoredPackages()
+        if (foregroundPkg !in monitoredPackages) {
+            stopFallbackTracking("non-monitored package: $foregroundPkg")
+            return
+        }
+
+        if (trackedPkg != foregroundPkg) {
+            stopFallbackTracking("switching to $foregroundPkg")
+            trackedPkg = foregroundPkg
+            checkInitialLimit(foregroundPkg)
+            return
+        }
+
+        tickForPackage(foregroundPkg)
+    }
+
+    private fun findForegroundPackageSince(fromMillis: Long, toMillis: Long): String? {
+        val usm = getSystemService(USAGE_STATS_SERVICE) as? UsageStatsManager ?: return trackedPkg
+        val events = usm.queryEvents(fromMillis.coerceAtMost(toMillis), toMillis)
+        val event = UsageEvents.Event()
+        var activePkg = trackedPkg
+
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            val pkg = event.packageName ?: continue
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED,
+                UsageEvents.Event.MOVE_TO_FOREGROUND -> activePkg = pkg
+                UsageEvents.Event.ACTIVITY_PAUSED,
+                UsageEvents.Event.ACTIVITY_STOPPED,
+                UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                    if (pkg == activePkg) activePkg = null
+                }
+            }
+        }
+
+        val isScreenOn = (getSystemService(POWER_SERVICE) as? android.os.PowerManager)?.isInteractive ?: true
+        return if (isScreenOn) activePkg else null
+    }
+
+    private suspend fun checkInitialLimit(pkg: String) {
+        if (!repo.blockingEnabledFlow.first()) return
+        if (System.currentTimeMillis() < repo.pauseUntilFlow.first()) return
+
+        val used = repo.getUsedSeconds(pkg)
+        val limitSec = repo.getLimitSeconds(pkg)
+        if (used >= limitSec) {
+            launchBlockedActivity(pkg)
+            stopFallbackTracking("limit reached on fallback launch")
+        }
+    }
+
+    private suspend fun tickForPackage(pkg: String) {
+        if (pkg !in repo.getMonitoredPackages()) {
+            stopFallbackTracking("$pkg removed from monitored list")
+            return
+        }
+
+        val used = repo.incrementUsedSeconds(pkg)
+        val limitSec = repo.getLimitSeconds(pkg)
+
+        if (!repo.blockingEnabledFlow.first()) return
+        if (System.currentTimeMillis() < repo.pauseUntilFlow.first()) return
+
+        if (used >= limitSec) {
+            try {
+                analyticsRepo.logHourSnapshot(pkg, used, wasBlocked = true)
+            } catch (_: Exception) {}
+            launchBlockedActivity(pkg)
+            stopFallbackTracking("limit reached for $pkg")
+        }
+    }
+
+    private fun stopFallbackTracking(reason: String) {
+        if (trackedPkg != null) {
+            Log.d(TAG, "Stopping Usage Access fallback tracking. Reason: $reason")
+        }
+        trackedPkg = null
+    }
+
+    private fun launchBlockedActivity(pkg: String) {
+        try {
+            val intent = Intent(applicationContext, BlockedActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra(BlockedActivity.EXTRA_BLOCKED_PACKAGE, pkg)
+            }
+            applicationContext.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch BlockedActivity for $pkg", e)
+        }
     }
 
     // ── Notification ───────────────────────────────────────────────────────

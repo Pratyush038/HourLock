@@ -1,5 +1,7 @@
 package com.hourlock.app
 
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -26,11 +28,26 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        startHourLockForegroundService()
         enableEdgeToEdge()
         setContent {
             HourLockTheme(darkTheme = true) {
                 HourLockNavHost()
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        startHourLockForegroundService()
+    }
+
+    private fun startHourLockForegroundService() {
+        val intent = Intent(this, HourLockForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
         }
     }
 }

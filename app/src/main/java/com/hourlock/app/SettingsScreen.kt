@@ -173,7 +173,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         PermissionRowItem(
                             label = "Accessibility Service",
-                            description = "Foreground app detection & quota enforcement",
+                            description = "Optional faster detection; turn off if payment apps complain",
                             icon = Icons.Filled.Lock,
                             granted = a11yGranted,
                             onGrant = {
@@ -189,7 +189,7 @@ fun SettingsScreen(onBack: () -> Unit) {
 
                         PermissionRowItem(
                             label = "Usage Access",
-                            description = "Daily screen time calculation & statistics",
+                            description = "Required for tracking and best-effort fallback",
                             icon = Icons.Filled.Timer,
                             granted = usageGranted,
                             onGrant = {

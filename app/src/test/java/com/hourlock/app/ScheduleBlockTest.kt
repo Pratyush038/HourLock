@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Calendar
 
 class ScheduleBlockTest {
 
@@ -30,6 +31,40 @@ class ScheduleBlockTest {
         assertEquals(0, schedule[0].startMinuteOfDay)
         assertEquals(24 * 60, schedule[0].endMinuteOfDay)
         assertTrue(validate(schedule))
+    }
+
+    @Test
+    fun testPauseUntilUsesNextClockHour() {
+        val cal = Calendar.getInstance().apply {
+            set(2026, Calendar.AUGUST, 31, 14, 37, 22)
+            set(Calendar.MILLISECOND, 123)
+        }
+
+        val next = Calendar.getInstance().apply {
+            timeInMillis = nextHourStartMillis(cal.timeInMillis)
+        }
+
+        assertEquals(15, next.get(Calendar.HOUR_OF_DAY))
+        assertEquals(0, next.get(Calendar.MINUTE))
+        assertEquals(0, next.get(Calendar.SECOND))
+        assertEquals(0, next.get(Calendar.MILLISECOND))
+    }
+
+    @Test
+    fun testPauseUntilExactlyOnHourUsesFollowingHour() {
+        val cal = Calendar.getInstance().apply {
+            set(2026, Calendar.AUGUST, 31, 14, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        val next = Calendar.getInstance().apply {
+            timeInMillis = nextHourStartMillis(cal.timeInMillis)
+        }
+
+        assertEquals(15, next.get(Calendar.HOUR_OF_DAY))
+        assertEquals(0, next.get(Calendar.MINUTE))
+        assertEquals(0, next.get(Calendar.SECOND))
+        assertEquals(0, next.get(Calendar.MILLISECOND))
     }
 
     @Test
