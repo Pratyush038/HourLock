@@ -306,8 +306,8 @@ fun HomeScreen(
                         )
                     }
 
-                    // 1-Hour Pause quick bar if active
-                    AnimatedVisibility(visible = blockingEnabled) {
+                    // 1-Hour Pause quick bar if active (hidden when commitment lock is active)
+                    AnimatedVisibility(visible = blockingEnabled && !isCommitmentLockActive) {
                         Column(modifier = Modifier.padding(top = DesignTokens.Spacing.md)) {
                             Surface(
                                 modifier = Modifier

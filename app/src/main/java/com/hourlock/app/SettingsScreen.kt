@@ -451,14 +451,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         // Pause Blocking Row
+                        val pauseLockedByCommitment = isCommitmentLockActive && !isPaused
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    scope.launch {
-                                        if (isPaused) repo.clearPause() else repo.pauseForOneHour()
+                                .then(
+                                    if (pauseLockedByCommitment) Modifier
+                                    else Modifier.clickable {
+                                        scope.launch {
+                                            if (isPaused) repo.clearPause() else repo.pauseForOneHour()
+                                        }
                                     }
-                                },
+                                ),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -469,19 +473,27 @@ fun SettingsScreen(onBack: () -> Unit) {
                                 Icon(
                                     Icons.Filled.PauseCircle,
                                     contentDescription = null,
-                                    tint = if (isPaused) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.GrayMuted,
+                                    tint = if (isPaused) DesignTokens.Palette.WarningAccent
+                                           else if (pauseLockedByCommitment) DesignTokens.Palette.GraySecondary
+                                           else DesignTokens.Palette.GrayMuted,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Column {
                                     Text(
-                                        text = if (isPaused) "Resume Blocking" else "Pause for 1 Hour",
+                                        text = if (isPaused) "Resume Blocking"
+                                               else if (pauseLockedByCommitment) "Pause Locked"
+                                               else "Pause for 1 Hour",
                                         style = DesignTokens.Typography.bodyMedium().copy(
-                                            color = if (isPaused) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.PureWhite,
+                                            color = if (isPaused) DesignTokens.Palette.WarningAccent
+                                                    else if (pauseLockedByCommitment) DesignTokens.Palette.GraySecondary
+                                                    else DesignTokens.Palette.PureWhite,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     )
                                     Text(
-                                        text = if (isPaused) "Pause currently active" else "Temporarily disable lock enforcement",
+                                        text = if (isPaused) "Pause currently active"
+                                               else if (pauseLockedByCommitment) "Commitment Lock prevents pausing"
+                                               else "Temporarily disable lock enforcement",
                                         style = DesignTokens.Typography.bodySmall().copy(
                                             color = DesignTokens.Palette.GrayMuted,
                                             fontSize = 11.sp
@@ -491,9 +503,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                             }
 
                             Text(
-                                text = if (isPaused) "RESUME" else "PAUSE",
+                                text = if (isPaused) "RESUME"
+                                       else if (pauseLockedByCommitment) "LOCKED"
+                                       else "PAUSE",
                                 style = DesignTokens.Typography.caption().copy(
-                                    color = if (isPaused) DesignTokens.Palette.WarningAccent else DesignTokens.Palette.PureWhite,
+                                    color = if (isPaused) DesignTokens.Palette.WarningAccent
+                                            else if (pauseLockedByCommitment) DesignTokens.Palette.GraySecondary
+                                            else DesignTokens.Palette.PureWhite,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 )
